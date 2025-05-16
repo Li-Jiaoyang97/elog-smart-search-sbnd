@@ -1,0 +1,123 @@
+PreAcc
+Extractor
+RIL
+RFQ
+Linac
+DTL
+LRF
+KRF
+SCL
+Booster
+BRF
+Debuncher
+GMPS
+Main Injector
+MI
+Switchyard
+MiniBoone
+MicroBoone
+BNB
+Today
+Wednesday
+March 
+Controls
+Mon 2/261300-1700dpe09test
+The last three days
+Fri Feb 16
+Linac
+Quiet week
+Saturday Day+ Shift
+Monday 2/191300-1700dce31DAEData
+March 13th 2024
+Thu Feb 15
+Linac MC
+Few more weeks
+Monday 2/26 at 0830
+Tue Feb 20
+Wednesday 9/211300-1700dce43DAEServlet
+Thursday, February 15, 2024
+Friday, Saturday & Sunday
+Friday Day
+ICARUS shifter
+Monday 2/190900-1200dce29DAEData
+Mon 2/261300-1700dpe10test
+Sunday Day+ Shift
+RRMonday
+ANNIE
+Q2
+January 20th
+Linac Access Day
+Day/TimeMachineServicesImpact notesMonday
+Neutrino Muon
+Key
+NOvA shifter
+Ops
+ICARUS
+SA
+Annie shifter
+Linac Tuning
+Tuning
+MBoonOAC
+OAC
+Dec 21 2023
+Q4
+DM
+Sub-zero
+ANNIE shifter
+ANNIE
+Icarus
+MI8
+Kautz
+SBND
+MI12
+Q3-5
+Q2, Q3,
+Op
+MS2
+ANNIE 
+shifter
+RR
+Neutrino MuonMeson
+Meson
+Curia II
+ANNIE SANDI
+Xenon
+Numi
+Curia
+Owl Shift
+SY
+MI
+Anode OL. Ops
+SciBoone
+Kirk
+HAB Vesda
+HAB
+Vesda
+DC
+Gauss
+Emphatic shifter
+Emphatic
+TOAD ORC
+LOTO
+IOTA
+DR
+Numi
+Summery
+Horn
+List
+PA
+Evening Shift
+MI Hipot
+MCenter
+NM
+ROC
+SBND Shifter
+SWYD
+ANNIE day shifter
+Enc.
+Muon
+J
+MIBEAM
+Texas
+Village
+ORC
