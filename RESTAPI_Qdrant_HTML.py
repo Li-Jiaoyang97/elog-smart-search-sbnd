@@ -33,14 +33,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
-# Allow frontend requests from localhost:3000
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Allow frontend requests from localhost:3000 so that React frontend can be tested quickly
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["http://localhost:3000"],
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
 
 
 
@@ -79,7 +79,7 @@ searcher_configs = {
 
 searcher = None
 
-active_sessions = {}
+active_sessions = {}        #Holds authenticated sessions for one hour
 
 
 class LoginRequest(BaseModel):
@@ -218,8 +218,8 @@ async def login(request: LoginRequest):
         
         active_sessions[request.username] = {
             "authenticated": True,
-            "expires_at": datetime.utcnow() + timedelta(hours=1)
-        }
+            "expires_at": datetime.utcnow() + timedelta(hours=1)        #Trackes time of creation.
+        }                                                               #utcnow is depreciated, so I'll need to fix this
 
         
         print(f"Active sessions after login: {active_sessions}")
