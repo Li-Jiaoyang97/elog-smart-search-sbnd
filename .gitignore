@@ -1,1 +1,3 @@
-models
+QdrantDocker/
+models/*
+!models/.gitkeep
