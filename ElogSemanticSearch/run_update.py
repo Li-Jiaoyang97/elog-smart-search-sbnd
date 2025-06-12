@@ -60,7 +60,7 @@ def parse_arguments():
     
     args = parser.parse_args()
     
-    # Ensure at least one method is used (either range or ID range) Should make it easier for OP to grab data
+    # Ensure at least one method is used (either range or ID range)
     if args.range is None and (args.start_id is None or args.end_id is None):
         parser.error("You must provide either an update range (-r) or a start and end note ID (-s and -e).")
     
@@ -70,8 +70,8 @@ def save_last_processed_id(elog_id):
     # Optionally implement saving to a file or database
     logger.info(f"Saved last processed ID: {elog_id}")
 
-def get_last_processed_id(default_id):      
-    # This is outdated code and needs to be replaced 
+def get_last_processed_id(default_id):
+    # If you wish to implement reading from a file later, you can uncomment this section
     # try:
     #     with open('last_processed_id.txt', 'r') as file:
     #         return int(file.read().strip())
@@ -97,11 +97,11 @@ def process_data_to_dataframe(entry_data, processor):
     clean_text = processor.process_text(combined_text)
     augmented_text = clean_text
     # Augment text with logs before processing
-    logs = entry_data.get('logs', [])  # Ensure logs exist, but there should always be at least one tagged log
+    logs = entry_data.get('logs', [])  # Ensure logs exist
     cats = entry_data.get("categories", [])  # Extract categories
     
     
-    # Only apply categories if they exist, because users don't need to include categories but they have to include at least one log
+    # Only apply categories if they exist
     if cats:
         augmented_text = processor.augment_with_cats(augmented_text, cats)
 

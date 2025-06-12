@@ -33,14 +33,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
-# Allow frontend requests from localhost:3000 so that React frontend can be tested quickly
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["http://localhost:3000"],
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
+# Allow frontend requests from localhost:3000
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 
@@ -56,7 +56,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Mount static files directory for my UI
+# Mount static files directory
 app.mount("/static", StaticFiles(directory="/app/ElogSemanticSearch/static"), name="static")
 
 # searcher_configs = {
@@ -79,7 +79,7 @@ searcher_configs = {
 
 searcher = None
 
-active_sessions = {}        #Holds authenticated sessions for one hour
+active_sessions = {}
 
 
 class LoginRequest(BaseModel):
@@ -115,10 +115,10 @@ class UpdateRequest(BaseModel):
     password: str
 
 def get_current_user(request: Request):
-    
-    #Checks if the user is authenticated by validating their session.
-    #If the session is invalid or missing, raises an HTTPException.
-    
+    """
+    Checks if the user is authenticated by validating their session.
+    If the session is invalid or missing, raises an HTTPException.
+    """
     username = request.headers.get("X-Username")  
     
     if not username or username not in active_sessions:
@@ -208,7 +208,9 @@ def call_search_function_rerank(query, limit, score_threshold, rank_limit, condi
 
 @app.post("/login")
 async def login(request: LoginRequest):
-    #Endpoint to authenticate a user and create an Elog session.
+    """
+    Endpoint to authenticate a user and create an Elog session.
+    """
     try:
         auth_success = session_fetcher.create_authenticated_session(request.username, request.password)
          
@@ -218,8 +220,8 @@ async def login(request: LoginRequest):
         
         active_sessions[request.username] = {
             "authenticated": True,
-            "expires_at": datetime.utcnow() + timedelta(hours=1)        #Trackes time of creation.
-        }                                                               #utcnow is depreciated, so I'll need to fix this
+            "expires_at": datetime.utcnow() + timedelta(hours=1)
+        }
 
         
         print(f"Active sessions after login: {active_sessions}")
@@ -269,11 +271,11 @@ def search(request: SearchRequest, username: str = Depends(get_current_user)):
         return {"success": True, "url":full_url, "hit_ids": hit_ids}
 
     except HTTPException as http_error:
-         # Return API errors 
+         # ✅ Return API-level errors (e.g., 404, 500)
         raise http_error
    
     except Exception as e:
-        # Catch unexpected errors and return 500 code
+        # ✅ Catch unexpected errors and return a 500 error
         logging.error(f"Unexpected error: {str(e)}")
         raise HTTPException(status_code=500, detail="An unexpected error occurred.")
    

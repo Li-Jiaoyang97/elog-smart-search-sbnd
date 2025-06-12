@@ -32,7 +32,6 @@ class SemanticSearch:
         self.collection_name = collection_name
         logging.info(f"SemanticSearch initialized with model {model_path} on {qdrant_host}:{qdrant_port} for collection '{collection_name}'.")
         
-        
 
     def set_filter_conditions(self, conditions):
        
@@ -54,37 +53,33 @@ class SemanticSearch:
         print(f"Filter conditions set: {must_conditions}")  #Very good for checking that the conditions you expected are being set.
         return models.Filter(must=must_conditions)
 
-    
-    
-    def adaptive_threshold_rec(self, scores: list[float]) -> float:
+    def adaptive_threshold_max(self, scores: list[float]) -> float:
         if not scores:
             return 0.0
 
         sorted_scores = sorted(scores, reverse=True)
         top_score = sorted_scores[0]
 
-        # Strategy 1: 70% of top score (sometimes very lenient)
+        # Strategy 1: 70% of top score (lenient)
         score_frac_cutoff = top_score * 0.70
 
-        # Strategy 2: Mean of top 20 - 1.25 * std (also lenient)
+        # Strategy 2: Mean of top 20 - 1.25 * std (lenient)
         top_n = sorted_scores[:min(20, len(sorted_scores))]
         stats_cutoff = np.mean(top_n) - 1.25 * np.std(top_n)
 
-        # Strategy 3: First large drop in score. Very all over the place. Not good by itself
+        # Strategy 3: First large drop in score
         drop_cutoff = top_score
         for i in range(len(sorted_scores) - 1):
             if sorted_scores[i] - sorted_scores[i + 1] > 0.02:
                 drop_cutoff = sorted_scores[i + 1]
                 break
-        
+
         
         print(f"Score cutoff (70% top): {score_frac_cutoff:.4f}")
         print(f"Stats cutoff (mean - 1.25*std): {stats_cutoff:.4f}")
         print(f"Drop cutoff (first big drop): {drop_cutoff:.4f}")
         
-        
         return min(stats_cutoff, (stats_cutoff + drop_cutoff) / 2)
-
     
     
     def adaptive_threshold_min(self, scores: list[float]) -> float:
@@ -143,6 +138,7 @@ class SemanticSearch:
                 
                 
                 
+                
                 scores = [hit.score for hit in hits]
                 for hit in hits:
                     print(f"ID {hit.id} Score: {hit.score}")
@@ -160,9 +156,16 @@ class SemanticSearch:
 
                 # Return only the IDs
                 return [fid for fid, _ in filtered_hits]
+                
+                # for hit in hits:
+                #     print(f"ID {hit.id} Score: {hit.score}")
+                # hit_ids = [str(hit.id) for hit in hits]
+                # #print(f"Search hits IDs: {hit_ids}") 
+                # #logging.info(f"Search response: {hits}")
 
                 
-                #  # Step 2: Adaptive threshold filtering
+                
+                # # Step 2: Adaptive threshold filtering
                 # if hits:
                 #     top_score = hits[0].score
                 #     adaptive_threshold = top_score * 0.75
@@ -176,8 +179,8 @@ class SemanticSearch:
                 #     print(f"ID {hit.id} Score: {hit.score}")
 
                 # hit_ids = [str(hit.id) for hit in filtered_hits]
-                # return hit_ids
                 
+                # return hit_ids
                 
                 
                 
@@ -227,29 +230,26 @@ class SemanticSearch:
                     score_threshold=score_threshold
                     )
 
-                
             scores = [hit.score for hit in hits]
             for hit in hits:
                 print(f"ID {hit.id} Score: {hit.score}")
 
             if scores:
-                threshold = self.adaptive_threshold_rec(scores)
+                threshold = self.adaptive_threshold_max(scores)
                 print(f"Top score: {scores[0]:.4f}, Adaptive threshold: {threshold:.4f}")
                 filtered_hits = [(str(hit.id), hit.score) for hit in hits if hit.score >= threshold]
             else:
                 filtered_hits = []
 
-                # Print IDs and scores
+            # Print IDs and scores
             for fid, fscore in filtered_hits:
                 print(f"ID {fid} Score: {fscore}")
+
 
             # Return only the IDs, with pos_id first
             final_ids = list(map(str, pos_id)) + [fid for fid, _ in filtered_hits]
             return final_ids
-
-        
-                
-                
+            
         except Exception as e:
             print(f"Error performing search: {e}")
             return []
