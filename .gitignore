@@ -1,3 +1,4 @@
 QdrantDockerFile/
 ElogSemanticSearch/models/*
 !ElogSemanticSearch/models/.gitkeep
+certs/

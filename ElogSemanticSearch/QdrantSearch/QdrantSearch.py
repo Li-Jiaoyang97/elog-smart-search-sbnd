@@ -18,7 +18,6 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
-# model_path="models/all-mpnet-base-v2"
 
 class SemanticSearch:
     def __init__(self, model_path, collection_name, qdrant_host, qdrant_port):

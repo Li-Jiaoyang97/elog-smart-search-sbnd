@@ -30,6 +30,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+model_path = os.environ.get("MODEL_PATH")  #load model path from .env
+if not model_path:
+    raise RuntimeError("Environment variable MODEL_PATH must be set.")
+
+
+collection_name = os.environ.get("COLLECTION_NAME")  # load configed collection name from .env
+if not collection_name:
+    raise RuntimeError("Environment variable COLLECTION_NAME must be set.")
+
 
 def fetch_and_process_entries(client, processor, start_id, end_id):
     dataframes = []
@@ -142,7 +151,7 @@ def run_update(update_range=None, start_id=None, end_id=None, username="", passw
 
         # Instantiate the text processor and client
         logger.info("Initializing text processor and ElogFetcher client.")
-        processor = TextProcessor(model_name="/app/ElogSemanticSearch/models/all-mpnet-base-v2")
+        processor = TextProcessor(model_name=model_path)
         client = ElogFetcher()
         client.create_authenticated_session(username, password)
 
@@ -201,13 +210,13 @@ def run_update(update_range=None, start_id=None, end_id=None, username="", passw
 
                 # When batch size is reached, perform the upsert
                 if len(batch) >= batch_size:
-                    qdrant_client.upsert(collection_name="Elog_collection_768_METADATA", points=batch)
+                    qdrant_client.upsert(collection_name=collection_name, points=batch)
                     logger.info(f"Upserted a batch of {len(batch)} entries.")
                     batch = []  # Clear the batch for the next round
 
         # Upsert any remaining points that do not fill a complete batch
         if batch:
-            qdrant_client.upsert(collection_name="Elog_collection_768_METADATA", points=batch)
+            qdrant_client.upsert(collection_name=collection_name, points=batch)
             logger.info(f"Upserted the final batch of {len(batch)} entries.")
 
         logger.info("Data upsert complete.")

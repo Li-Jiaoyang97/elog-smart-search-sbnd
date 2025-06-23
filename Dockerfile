@@ -13,10 +13,16 @@ COPY --from=builder /usr/local/lib/python3.11 /usr/local/lib/python3.11
 
 
 COPY ElogSemanticSearch /app/ElogSemanticSearch
-#COPY .env /app/.env
+#COPY certs /certs
+COPY .env /app/.env
 
 
 EXPOSE 8000
+#EXPOSE 443
+
+#CMD ["python", "-m", "uvicorn", "ElogSemanticSearch.RESTAPI_Qdrant_HTML:app", "--host", "0.0.0.0", "--port", "443", "--ssl-keyfile=/certs/key.pem", "--ssl-certfile=/certs/cert.pem"]
+
+
 CMD ["python", "-m", "uvicorn", "ElogSemanticSearch.RESTAPI_Qdrant_HTML:app", "--host", "0.0.0.0", "--port", "8000"]
 
 #CMD ["uvicorn", "ElogSemanticSearch.RESTAPI_Qdrant_HTML:app", "--host", "0.0.0.0", "--port", "8000"]

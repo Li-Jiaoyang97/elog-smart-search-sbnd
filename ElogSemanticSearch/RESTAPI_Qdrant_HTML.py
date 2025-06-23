@@ -15,6 +15,7 @@ Created on Sat Sep 21 19:15:03 2024
 
 base_url = "https://www-bd.fnal.gov/Elog/"
 import os
+from dotenv import load_dotenv
 import subprocess
 import logging
 from fastapi import FastAPI, HTTPException, BackgroundTasks
@@ -33,21 +34,27 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
-# Allow frontend requests from localhost:3000
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Allow frontend requests from localhost:3000 for fast UI development in React. I'll comment this out in prod
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["http://localhost:3000"],
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
 
-
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["https://www-bd.fnal.gov"],
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
 
 
 
 session_fetcher = SessionFetcher()
-
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(
@@ -55,6 +62,9 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+
 
 # Mount static files directory
 app.mount("/static", StaticFiles(directory="/app/ElogSemanticSearch/static"), name="static")
@@ -68,11 +78,16 @@ app.mount("/static", StaticFiles(directory="/app/ElogSemanticSearch/static"), na
 #     }
 # }
 
+def required_env(var_name: str) -> str:
+    if var_name in os.environ:
+        return os.environ[var_name]
+    raise RuntimeError(f"Environment variable {var_name} must be set.")
+
 searcher_configs = {
     "All-MPNet-v2-Update": {
-        "model_path": "/app/ElogSemanticSearch/models/all-mpnet-base-v2",
-        "collection_name": "Elog_collection_768_METADATA",
-        "host": "qdrant",  # Docker service name for Qdrant
+        "model_path": required_env("MODEL_PATH"),
+        "collection_name": required_env("COLLECTION_NAME"),
+        "host": os.environ["QDRANT_HOST"],               #CHange for K8
         "port": 6333
     }
 }
@@ -392,5 +407,5 @@ def run_update_script(update_range=None, start_id=None, end_id=None, username=""
 
 
 if __name__ == "__main__":
-    import uvicorn
+    import uvicorn                    #DOcker should run it properly, so I commented this out.
     uvicorn.run(app, host="0.0.0.0", port=8000)

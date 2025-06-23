@@ -1,0 +1,7 @@
+For next week
+
+Less than 2 minutes
+
+1. Build a new docker container with all updated features
+2. Look into what I can cut from requirements
+3. Do I need regex?
