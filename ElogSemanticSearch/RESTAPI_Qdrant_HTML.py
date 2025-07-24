@@ -286,11 +286,11 @@ def search(request: SearchRequest, username: str = Depends(get_current_user)):
         return {"success": True, "url":full_url, "hit_ids": hit_ids}
 
     except HTTPException as http_error:
-         # ✅ Return API-level errors (e.g., 404, 500)
+         # Return API-level errors (e.g., 404, 500)
         raise http_error
    
     except Exception as e:
-        # ✅ Catch unexpected errors and return a 500 error
+        # Catch unexpected errors and return a 500 error
         logging.error(f"Unexpected error: {str(e)}")
         raise HTTPException(status_code=500, detail="An unexpected error occurred.")
    
