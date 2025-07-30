@@ -11,18 +11,17 @@ import re
 from datetime import datetime
 from bs4 import BeautifulSoup
 import html
-import torch
+#import torch
 from sentence_transformers import SentenceTransformer
 
 class TextProcessor:
     def __init__(self, model_name):
         self.model = SentenceTransformer(model_name)
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        #self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # print(f"Using {'CUDA' if self.device.type == 'cuda' else 'CPU'} for processing.")
        
         #  # Enable GPU for spaCy
         # spacy.require_gpu()
-        #  #For anonymization
         # self.nlp = spacy.load("en_core_web_trf")
         # self.exclusions = self.load_exclusions('exclusions.txt')
 
@@ -118,7 +117,6 @@ class TextProcessor:
         """
         text = self.clean_unicode_characters(text)
         text = self.clean_text(text)
-        #text = self.anonymize_text(text)
         return text
 
     def generate_embeddings(self, text):
@@ -127,9 +125,13 @@ class TextProcessor:
         This method handles tokenization and model inference internally.
         This is needed because QDrant does not support the actual embedding step.
         """
+        
+        return self.model.encode(text, convert_to_numpy=True)
+
+        
         # The encode method of SentenceTransformer directly returns the embeddings as a tensor
-        embeddings = self.model.encode(text, convert_to_tensor=True, device=self.device)
-        return embeddings.cpu().numpy()  # Convert tensor to numpy array if needed. Sometimes you can get errors if the embedding is not a numpy array.
+        #embeddings = self.model.encode(text, convert_to_tensor=True, device=self.device)
+        #return embeddings.cpu().numpy()  # Convert tensor to numpy array if needed. Sometimes you can get errors if the embedding is not a numpy array.
 
     def date_to_rfc3339(self, date_str):
         """
@@ -141,67 +143,6 @@ class TextProcessor:
         except ValueError:
             return None
 
-
-    # def load_exclusions(self, file_path):
-    #     """Load terms that should not be anonymized from a text file."""
-    #     with open(file_path, 'r') as file:
-    #         exclusions = set(line.strip().lower() for line in file)
-    #     return exclusions
-    
-    # def anonymize_text(self, text, save_entities=True, entities_file="anonymized_entities.txt"):
-    #     """
-    #     Anonymizes sensitive information in the text. Optionally saves original entities to a file.
-    #     """
-    #     # Regex patterns for sensitive data
-    #     email_pattern = re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b')
-    #     ssn_pattern = re.compile(r'\b\d{3}-\d{2}-\d{4}\b')
-    #     credit_card_pattern = re.compile(r'\b(?:\d{4}[ -]?){3}\d{4}\b')
-    #     driver_license_pattern = re.compile(r'\b[A-Z]{1,2}-\d{6,8}\b')
-        
-    #     date_keywords = {
-    #         'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
-    #         'jan', 'january', 'feb', 'february', 'mar', 'march', 'apr', 'april', 'may', 'jun',
-    #         'june', 'jul', 'july', 'aug', 'august', 'sep', 'september', 'oct', 'october', 
-    #         'nov', 'november', 'dec', 'december', 'today', 'tomorrow', 'yesterday', 'weekend',
-    #         'mon', 'tues', 'wed', 'thu', 'fri', 'sat', 'sun'
-    #     }
-    
-    #     doc = self.nlp(text)
-    #     anonymized_text = text
-    #     ner_anonymized_words = []
-        
-    #     # Define specific tokens for PERSON and LOCATION entities
-    #     entity_tokens = {
-    #         'PERSON': '[PERSON]',
-    #         'GPE': '[LOCATION]'
-    #     }
-        
-    #     for ent in reversed(doc.ents):
-    #         entity_text_lower = ent.text.lower()
-            
-    #         if any(keyword in entity_text_lower for keyword in date_keywords) or any(char.isdigit() for char in ent.text):
-    #             continue
-            
-    #         if ent.label_ in entity_tokens and ent.text[0].isupper() and entity_text_lower not in self.exclusions:
-    #             replacement_token = entity_tokens[ent.label_]
-    #             ner_anonymized_words.append(ent.text)  # Log original entity
-    #             anonymized_text = anonymized_text[:ent.start_char] + replacement_token + anonymized_text[ent.end_char:]
-    
-    #     # Optionally save the original NER-identified entities to a file
-    #     if save_entities and ner_anonymized_words:
-    #         with open(entities_file, 'a') as file:
-    #             for word in ner_anonymized_words:
-    #                 file.write(word + "\n")
-    
-    #     # Apply regex patterns for anonymization, now uniformly using "[REDACTED]"
-    #     anonymized_text = email_pattern.sub("[REDACTED]", anonymized_text)
-    #     anonymized_text = ssn_pattern.sub("[REDACTED]", anonymized_text)
-    #     anonymized_text = credit_card_pattern.sub("[REDACTED]", anonymized_text)
-    #     anonymized_text = driver_license_pattern.sub("[REDACTED]", anonymized_text)
-
-    #     return anonymized_text
-
-    
 
 
 # Example of using the TextProcessor class if needed. You don't need the print statements after intial testing.

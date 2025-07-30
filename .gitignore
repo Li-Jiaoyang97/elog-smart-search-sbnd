@@ -2,3 +2,4 @@ QdrantDockerFile/
 ElogSemanticSearch/models/*
 !ElogSemanticSearch/models/.gitkeep
 certs/
+To do list.txt

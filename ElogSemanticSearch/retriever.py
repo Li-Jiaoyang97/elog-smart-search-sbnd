@@ -24,8 +24,8 @@ You will need to adapt this retriever to whatever API your logbook uses to acces
 
 class ContextRetriever:
     def __init__(self):
-        self.username = os.environ.get('USERNAME')
-        self.password = os.environ.get('PASSWORD')
+        self.username = 'username'
+        self.password = 'password'
         self.client = ElogFetcher()
         self.processor = TextProcessor(model_name="/app/ElogSemanticSearch/models/all-mpnet-base-v2")
         self.contexts = []  # List to store full entry details including metadata

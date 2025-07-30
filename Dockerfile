@@ -1,28 +1,39 @@
 
-FROM python:3.11.4-slim AS builder
+FROM python:3.11-slim AS builder
+
 WORKDIR /app
+
+#install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc \
+    libffi-dev \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir --prefix=/install -r requirements.txt
 
+#slim runtime image
+FROM python:3.11-slim
 
-FROM python:3.11.4-slim
 WORKDIR /app
 
-# Copy installed dependencies from the builder stage
-COPY --from=builder /usr/local/lib/python3.11 /usr/local/lib/python3.11
+# runtime libraries
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libssl3 \
+    libffi8 \
+    && rm -rf /var/lib/apt/lists/*
 
+# Copy installed packages from builder step
+COPY --from=builder /install /usr/local
 
+# Copy application files
 COPY ElogSemanticSearch /app/ElogSemanticSearch
-#COPY certs /certs
 COPY .env /app/.env
-
+# COPY certs /certs  
 
 EXPOSE 8000
-#EXPOSE 443
-
-#CMD ["python", "-m", "uvicorn", "ElogSemanticSearch.RESTAPI_Qdrant_HTML:app", "--host", "0.0.0.0", "--port", "443", "--ssl-keyfile=/certs/key.pem", "--ssl-certfile=/certs/cert.pem"]
-
 
 CMD ["python", "-m", "uvicorn", "ElogSemanticSearch.RESTAPI_Qdrant_HTML:app", "--host", "0.0.0.0", "--port", "8000"]
-
-#CMD ["uvicorn", "ElogSemanticSearch.RESTAPI_Qdrant_HTML:app", "--host", "0.0.0.0", "--port", "8000"]

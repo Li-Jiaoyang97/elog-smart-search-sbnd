@@ -80,7 +80,6 @@ def save_last_processed_id(elog_id):
     logger.info(f"Saved last processed ID: {elog_id}")
 
 def get_last_processed_id(default_id):
-    # If you wish to implement reading from a file later, you can uncomment this section
     # try:
     #     with open('last_processed_id.txt', 'r') as file:
     #         return int(file.read().strip())
@@ -100,7 +99,7 @@ def process_data_to_dataframe(entry_data, processor):
     # Combine and clean the main text and comments
     combined_text = f"{main_text} {comments_text}".strip()
     
-    # **Print 1: Before Augmentation**
+    #Print 1: Before Augmentation**
     print(f"\n[DEBUG] Original Text for ID {entry_data.get('id')}: {combined_text[:200]}...")  # Truncate for readability
     # print(f"[DEBUG] Logs: {entry_data.get('logs', [])}\n")
     clean_text = processor.process_text(combined_text)
@@ -116,7 +115,7 @@ def process_data_to_dataframe(entry_data, processor):
 
     augmented_text = processor.augment_with_logs(augmented_text, logs)
     
-    # **Print 2: After Augmentation**
+    # Print 2: After Augmentation**
     print(f"[DEBUG] Augmented Text: {augmented_text[:300]}...\n")
 
     
@@ -179,7 +178,7 @@ def run_update(update_range=None, start_id=None, end_id=None, username="", passw
         dataframes = fetch_and_process_entries(client, processor, most_recent_id, specified_id)
         
         logger.info("Initializing Qdrant client.")
-        qdrant_client = QdrantClient(host="qdrant", port=6333)
+        qdrant_client = QdrantClient(host=os.environ.get("QDRANT_HOST"), port=6333)
 
         batch_size = 500  # Adjust the batch size as needed
         batch = []

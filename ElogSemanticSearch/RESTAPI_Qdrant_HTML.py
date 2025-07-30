@@ -24,7 +24,7 @@ from typing import List, Dict, Optional
 import ast
 from datetime import datetime, timedelta
 from ElogSemanticSearch.QdrantSearch.QdrantSearch import SemanticSearch
-# from ElogSemanticSearch.reranker import CustomReRanker
+#from ElogSemanticSearch.reranker import CustomReRanker
 from fastapi.staticfiles import StaticFiles
 from fastapi import Query
 from fastapi import Depends, Request
@@ -37,7 +37,7 @@ app = FastAPI()
 # Allow frontend requests from localhost:3000 for fast UI development in React. I'll comment this out in prod
 # app.add_middleware(
 #     CORSMiddleware,
-#     allow_origins=["http://localhost:3000"],
+#     allow_origins=["http://localhost:3002"],
 #     allow_credentials=True,
 #     allow_methods=["*"],
 #     allow_headers=["*"],
@@ -286,11 +286,11 @@ def search(request: SearchRequest, username: str = Depends(get_current_user)):
         return {"success": True, "url":full_url, "hit_ids": hit_ids}
 
     except HTTPException as http_error:
-         # ✅ Return API-level errors (e.g., 404, 500)
+         #Return API-level errors
         raise http_error
    
     except Exception as e:
-        # ✅ Catch unexpected errors and return a 500 error
+        #Catch unexpected errors and return a 500 error
         logging.error(f"Unexpected error: {str(e)}")
         raise HTTPException(status_code=500, detail="An unexpected error occurred.")
    
