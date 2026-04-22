@@ -7,7 +7,7 @@ Created on Sun Sep 22 19:22:57 2024
 @author: haydenh
 """
 
-base_url = "https://www-bd.fnal.gov/Elog/"
+base_url = "https://dbweb1.fnal.gov:8443/ECL/sbnd/E/"
 
 
 #!/usr/bin/env python
