@@ -14,7 +14,7 @@ tokenizers==0.19.1
 
 
 # cpu torch
-torch==2.2.0+cpu
+#torch==2.2.0+cpu
 -f https://download.pytorch.org/whl/torch_stable.html
 
 # HTML and text cleaning
@@ -22,6 +22,9 @@ beautifulsoup4==4.12.3
 html5lib==1.1
 lxml==4.9.4
 
+
+# ECL API (Fermilab Electronic Conditions Logbook client)
+ecl-api==0.0.3
 
 #data tools
 pandas==2.2.2
