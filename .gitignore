@@ -4,3 +4,4 @@ ElogSemanticSearch/models/*
 certs/
 ElogSemanticSearch/pwd.txt
 To do list.txt
+QdrantDockerFile/qdrant_storage/
