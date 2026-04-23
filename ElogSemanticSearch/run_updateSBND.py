@@ -25,9 +25,7 @@ USERNAME = os.environ.get('ECL_USERNAME', 'sbndprm')
 PASSWORD = os.environ.get('ECL_PASSWORD', ecl_pwd)
 
 from DataFetch.ElogFetcherQdrantSBND import ElogFetcher
-from DataFetch.text_to_vector import TextProcessor
-import pandas as pd
-import json
+from DataFetch.text_to_vectorSBND import TextProcessor
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import Distance, PointStruct, VectorParams
@@ -47,28 +45,88 @@ collection_name = os.environ.get("COLLECTION_NAME")
 if not collection_name:
     raise RuntimeError("Environment variable COLLECTION_NAME must be set.")
 
+SKIP_SUBJECT_KEYWORDS = ["checklist"]
 
-def fetch_and_process_entries(client, processor, entry_ids, max_workers=10):
-    """Fetch and process a list of entry IDs in parallel, returning a list of DataFrames."""
+
+def _print_entry(entry):
+    print(f"  ID:            {entry['id']}")
+    print(f"  Log:           {entry['logs']}")
+    print(f"  Date:          {entry['creation_date']}")
+    print(f"  Categories:    {entry['categories']}")
+    print(f"  Subject:       {entry.get('subject', '')}")
+    print(f"  Text preview:  {entry['text'][:120]}...")
+    print(f"  Comments:      {len(entry['comments'])} comment(s)")
+    for i, c in enumerate(entry['comments'], 1):
+        print(f"    [{i}] {c['modified_date']} — {c['text'][:60]}...")
+
+
+def should_skip(entry_data):
+    subject = entry_data.get('subject', '').lower()
+    text    = entry_data.get('text', '').lower()
+    return any(kw in subject or kw in text for kw in SKIP_SUBJECT_KEYWORDS)
+
+
+def entry_to_point(entry, processor):
+    main_text = entry.get('text', '')
+    comments_text = " ".join(c.get('text', '') for c in entry.get('comments', []))
+    combined = f"{main_text} {comments_text}".strip()
+
+    clean_text = processor.process_text(combined)
+    augmented_text = clean_text
+
+    logs = entry.get('logs', [])
+    subcategory = entry.get('subcategory', '')
+    cats = [subcategory] if subcategory else []
+
+    if cats:
+        augmented_text = processor.augment_with_cats(augmented_text, cats)
+    augmented_text = processor.augment_with_logs(augmented_text, logs)
+
+    vector = processor.generate_embeddings(augmented_text).tolist()
+    creation_date = processor.date_to_rfc3339(entry.get('creation_date', ''))
+
+    return PointStruct(
+        id=entry['id'],
+        vector=vector,
+        payload={
+            'subject':       entry.get('subject', ''),
+            'top_category':  entry.get('top_category', ''),
+            'subcategory':   entry.get('subcategory', ''),
+            'creation_date': creation_date,
+        }
+    )
+
+
+def fetch_and_process_entries(client, processor, entry_ids, max_workers=10, verbose=False):
+    """Fetch and process entry IDs in parallel, returning a list of PointStructs."""
     logger.info(f"Fetching {len(entry_ids)} entries with {max_workers} workers.")
 
     def fetch_one(entry_id):
-        entry_data = client.get_entry(str(entry_id))
-        if entry_data:
-            return process_data_to_dataframe(entry_data, processor)
-        else:
+        entry = client.get_entry(str(entry_id))
+        if entry is None:
             logger.warning(f"No data found for entry ID {entry_id}")
             return None
+        if should_skip(entry):
+            if verbose:
+                logger.info(f"Skipped entry ID {entry_id}: subject='{entry.get('subject', '')}'")
+            return None
+        if verbose:
+            _print_entry(entry)
+        try:
+            return entry_to_point(entry, processor)
+        except Exception as e:
+            logger.warning(f"ID {entry_id}: processing error — {e}")
+            return None
 
-    dataframes = []
+    points = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(fetch_one, eid): eid for eid in entry_ids}
         for future in as_completed(futures):
             result = future.result()
             if result is not None:
-                dataframes.append(result)
+                points.append(result)
 
-    return dataframes
+    return points
 
 
 def parse_arguments():
@@ -79,8 +137,8 @@ def parse_arguments():
                         help='Max entries to fetch per category.')
     parser.add_argument('-u', '--username', type=str, default=USERNAME, help='Username for authentication.')
     parser.add_argument('-p', '--password', type=str, default=PASSWORD, help='Password for authentication.')
-    parser.add_argument('--clear', action='store_true',
-                        help='Delete all points from the Qdrant collection before updating.')
+    parser.add_argument('--verbose', action='store_true',
+                        help='Print entry details as they are processed.')
     return parser.parse_args()
 
 
@@ -101,58 +159,8 @@ def ensure_collection_exists(qdrant_client, vector_size=768):
         logger.info(f"Collection '{collection_name}' already exists.")
 
 
-def clear_collection():
-    """Delete all points from the configured Qdrant collection."""
-    qdrant_client = _get_qdrant_client()
-    qdrant_client.delete_collection(collection_name=collection_name)
-    logger.info(f"Deleted collection '{collection_name}'.")
-    return True
 
-
-def process_data_to_dataframe(entry_data, processor):
-    rows = []
-    main_text = entry_data.get('text', '')
-
-    comments = entry_data.get('comments', [])
-    comments_text = " ".join(comment.get('text', '') for comment in comments)
-
-    combined_text = f"{main_text} {comments_text}".strip()
-
-    logger.debug(f"Original Text for ID {entry_data.get('id')}: {combined_text[:200]}...")
-
-    clean_text = processor.process_text(combined_text)
-    augmented_text = clean_text
-
-    logs = entry_data.get('logs', [])
-    cats = entry_data.get("categories", [])
-
-    if cats:
-        augmented_text = processor.augment_with_cats(augmented_text, cats)
-
-    augmented_text = processor.augment_with_logs(augmented_text, logs)
-
-    logger.debug(f"Augmented Text: {augmented_text[:300]}...")
-
-    vector = processor.generate_embeddings(augmented_text)
-
-    creation_date = processor.date_to_rfc3339(entry_data.get('creation_date', ''))
-
-    logs_json = json.dumps(entry_data.get('logs', []))
-    categories_json = json.dumps(entry_data.get('categories', []))
-
-    rows.append({
-        'id': entry_data.get('id'),
-        'vector': vector,
-        'logs': logs_json,
-        'categories': categories_json,
-        'creation_date': creation_date
-    })
-
-    logger.info(f"Processed entry for ID {entry_data.get('id')}.")
-    return pd.DataFrame(rows)
-
-
-def run_update(after='7days', limit=50, username="", password=""):
+def run_update(after='7days', limit=50, username="", password="", verbose=False):
 
     try:
         logger.info("Initializing text processor and ElogFetcher client.")
@@ -174,53 +182,23 @@ def run_update(after='7days', limit=50, username="", password=""):
 
         logger.info(f"Found {len(all_entry_ids)} unique entries to process.")
 
-        # grab the e-log with the most recent entry ID to get the category names and log names for augmentation
-        for cat, ids in entry_ids.items():
-            if ids:
-                logger.info(f"Category '{cat}' has {len(ids)} entries. Most recent ID: {max(ids)}")
-                most_recent_id = max(ids)
-                most_recent_entry = client.get_entry(most_recent_id)
-                client._print_entry(most_recent_entry)
-            else:
-                logger.info(f"Category '{cat}' has no recent entries.")
+        points = fetch_and_process_entries(client, processor, all_entry_ids, verbose=verbose)
 
-
-        
-        dataframes = fetch_and_process_entries(client, processor, all_entry_ids)
+        if not points:
+            logger.warning("No points to upsert.")
+            return False
 
         logger.info("Initializing Qdrant client.")
         qdrant_client = _get_qdrant_client()
         ensure_collection_exists(qdrant_client)
 
         batch_size = 500
-        batch = []
-
-        logger.info("Upserting data into Qdrant.")
-        for df in dataframes:
-            for _, row in df.iterrows():
-                elog_id = row['id']
-                vector = row['vector']
-                category_names = json.loads(row['categories']) if isinstance(row['categories'], str) else row['categories']
-                log_names = json.loads(row['logs']) if isinstance(row['logs'], str) else row['logs']
-                creation_date = row['creation_date']
-
-                payload = {
-                    "category_names": category_names,
-                    "log_names": log_names,
-                    "creation_date": creation_date
-                }
-                batch.append(PointStruct(id=elog_id, vector=vector, payload=payload))
-
-                if len(batch) >= batch_size:
-                    qdrant_client.upsert(collection_name=collection_name, points=batch)
-                    logger.info(f"Upserted a batch of {len(batch)} entries.")
-                    batch = []
-
-        if batch:
+        for i in range(0, len(points), batch_size):
+            batch = points[i:i + batch_size]
             qdrant_client.upsert(collection_name=collection_name, points=batch)
-            logger.info(f"Upserted the final batch of {len(batch)} entries.")
+            logger.info(f"Upserted batch of {len(batch)} entries.")
 
-        logger.info("Data upsert complete.")
+        logger.info(f"Data upsert complete. Total: {len(points)} entries.")
         return True
 
     except Exception as e:
@@ -230,7 +208,4 @@ def run_update(after='7days', limit=50, username="", password=""):
 
 if __name__ == "__main__":
     args = parse_arguments()
-    if args.clear:
-        logger.warning(f"--clear flag set: deleting all points from collection '{collection_name}'.")
-        clear_collection()
-    run_update(args.after, args.limit, args.username, args.password)
+    run_update(args.after, args.limit, args.username, args.password, args.verbose)

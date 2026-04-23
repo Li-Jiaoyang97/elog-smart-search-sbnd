@@ -34,7 +34,7 @@ ECL_CATEGORIES = [
     'Photon Detection/Reflecting Foils',
     'Photon Detection/XARAPUCA',
     'Purity Monitors',
-     #'Shift',
+    'Shift',
     'TPC',
     'TPC/APA',
     'TPC/APA Wiring',

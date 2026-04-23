@@ -67,7 +67,6 @@ class TextProcessor:
         return f"{cats_str}{cats_natural_text}{text}"
 
 
-        
     def clean_unicode_characters(self, text):
         """
         Removes specific unicode characters and cleans the text. 
@@ -137,11 +136,25 @@ class TextProcessor:
         """
         Converts date from string format to RFC 3339 format. Qdrant does best storing time in this manner.
         """
-        try:
-            dt = datetime.strptime(date_str, "%b %d, %Y %I:%M:%S %p")
-            return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-        except ValueError:
+        if not date_str:
             return None
+        formats = [
+            "%b %d, %Y %I:%M:%S %p",     # Mar 18, 2026 10:04:46 AM  (original AD elog)
+            "%m/%d/%Y %H:%M:%S",         # 03/18/2026 10:04:46
+            "%Y-%m-%dT%H:%M:%S",         # 2026-03-18T10:04:46
+            "%Y-%m-%dT%H:%M:%S%z",       # 2026-03-18T10:04:46-05:00
+            "%Y-%m-%d %H:%M:%S",         # 2026-03-18 10:04:46
+            "%a, %d %b %Y %H:%M:%S %z",  # Wed, 18 Mar 2026 10:04:46 -0500
+        ]
+        for fmt in formats:
+            try:
+                dt = datetime.strptime(date_str, fmt)
+                return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+            except ValueError:
+                continue
+        import logging
+        logging.getLogger(__name__).warning(f"Unrecognized date format: {date_str!r}")
+        return None
 
 
 

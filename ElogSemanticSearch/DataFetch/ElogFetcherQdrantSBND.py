@@ -12,7 +12,7 @@ and parses the returned XML into the dict format the pipeline expects.
 """
 
 import os
-from config import ECL_CATEGORIES
+from ECLConfig import ECL_CATEGORIES
 
 from ecl_api import ECL
 import xml.etree.ElementTree as ET
@@ -178,22 +178,29 @@ class ElogFetcher:
         if categories is None:
             categories = ECL_CATEGORIES
 
-        def fetch_category(category_name):
-            try:
-                encoded = quote(category_name, safe='/-')
-                text = self.ecl.search(category=encoded, limit=limit, after=after)
-                xml = ET.fromstring(text)
-                entries = xml.findall('./entry')
-                ids = sorted(
-                    [int(e.attrib['id']) for e in entries if e.attrib.get('id')],
-                    reverse=True
-                )
-                if debug:
-                    print(f"  [{category_name}] Found {len(ids)} entries")
-                return category_name, ids
-            except Exception as e:
-                print(f"  [{category_name}] Exception: {type(e).__name__}: {e}")
-                return category_name, []
+        def fetch_category(category_name, retries=3, backoff=2.0):
+            import time
+            encoded = quote(category_name, safe='/-')
+            for attempt in range(retries):
+                try:
+                    text = self.ecl.search(category=encoded, limit=limit, after=after)
+                    xml = ET.fromstring(text)
+                    entries = xml.findall('./entry')
+                    ids = sorted(
+                        [int(e.attrib['id']) for e in entries if e.attrib.get('id')],
+                        reverse=True
+                    )
+                    if debug:
+                        print(f"  [{category_name}] Found {len(ids)} entries")
+                    return category_name, ids
+                except Exception as e:
+                    if attempt < retries - 1:
+                        print(f"  [{category_name}] Attempt {attempt+1} failed ({type(e).__name__}), retrying in {backoff}s...")
+                        time.sleep(backoff)
+                        backoff *= 2
+                    else:
+                        print(f"  [{category_name}] Exception after {retries} attempts: {type(e).__name__}: {e}")
+                        return category_name, []
 
         result = {}
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -271,12 +278,18 @@ class ElogFetcher:
                 })
 
         # ── Assemble final dict ───────────────────────────────────────────────
+        parts = category.split('/', 1) if category else []
+        top_category = parts[0] if parts else ''
+        subcategory  = parts[1] if len(parts) > 1 else ''
         return {
             'id':            int(entry_id),
             'text':          ' '.join(text_parts),
-            #'logs':          [category] if category else [],
-            'categories':    [category] if category else [],
-            'creation_date': timestamp,
+            'logs':          [top_category] if top_category else [],
+            'categories':    [category]     if category     else [],
+            'subject':       (subject or '').strip(),
+            'top_category':  top_category or '',
+            'subcategory':   subcategory or '',
+            'creation_date': timestamp or '',
             'comments':      comments,
         }
     
@@ -285,9 +298,10 @@ class ElogFetcher:
         Pretty-print an entry dict after parsing.
         """
         print(f"  ID:            {entry['id']}")
-        #print(f"  Log:           {entry['logs']}")
+        print(f"  Log:           {entry['logs']}")
         print(f"  Date:          {entry['creation_date']}")
         print(f"  Categories:    {entry['categories']}")
+        print(f"  Subject:       {entry.get('subject', '')}")
         print(f"  Text preview:  {entry['text'][:120]}...")
         print(f"  Comments:      {len(entry['comments'])} comment(s)")
 

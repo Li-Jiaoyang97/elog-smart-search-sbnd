@@ -7,20 +7,20 @@ Created on Sun Sep 22 19:22:57 2024
 @author: haydenh
 """
 
-base_url = "https://dbweb1.fnal.gov:8443/ECL/sbnd/E/"
-
-
 #!/usr/bin/env python
 
 import os
 import logging
-import argparse  
+import argparse
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
+
 from DataFetch.ElogFetcherQdrant import ElogFetcher
 from DataFetch.text_to_vector import TextProcessor
 import pandas as pd
 import json
 from qdrant_client import QdrantClient
-from qdrant_client.http.models import PointStruct
+from qdrant_client.http.models import PointStruct, VectorParams, Distance
 import traceback
 
 # Configure logging
@@ -35,9 +35,9 @@ if not model_path:
     raise RuntimeError("Environment variable MODEL_PATH must be set.")
 
 
-collection_name = os.environ.get("COLLECTION_NAME")  # load configed collection name from .env
+collection_name = os.environ.get("AD_COLLECTION_NAME")
 if not collection_name:
-    raise RuntimeError("Environment variable COLLECTION_NAME must be set.")
+    raise RuntimeError("Environment variable AD_COLLECTION_NAME must be set.")
 
 
 def fetch_and_process_entries(client, processor, start_id, end_id):
@@ -128,6 +128,10 @@ def process_data_to_dataframe(entry_data, processor):
     logs_json = json.dumps(entry_data.get('logs', []))
     categories_json = json.dumps(entry_data.get('categories', []))
 
+    # print logs_json and categories_json for debugging
+    print(f"[DEBUG] Logs JSON: {logs_json}")
+    print(f"[DEBUG] Categories JSON: {categories_json}")
+    
     # Append a dictionary for each processed entry to rows
     rows.append({
         'id': entry_data.get('id'),
@@ -173,12 +177,19 @@ def run_update(update_range=None, start_id=None, end_id=None, username="", passw
         if most_recent_id <= 0 or specified_id <= 0:
             raise ValueError(f"Invalid start_id ({most_recent_id}) or end_id ({specified_id}). Ensure correct inputs.")
 
-
         # Fetch and process entries
         dataframes = fetch_and_process_entries(client, processor, most_recent_id, specified_id)
         
         logger.info("Initializing Qdrant client.")
         qdrant_client = QdrantClient(host=os.environ.get("QDRANT_HOST"), port=6333)
+
+        existing = [c.name for c in qdrant_client.get_collections().collections]
+        if collection_name not in existing:
+            logger.info(f"Collection '{collection_name}' not found. Creating it.")
+            qdrant_client.create_collection(
+                collection_name=collection_name,
+                vectors_config=VectorParams(size=768, distance=Distance.COSINE),
+            )
 
         batch_size = 500  # Adjust the batch size as needed
         batch = []
