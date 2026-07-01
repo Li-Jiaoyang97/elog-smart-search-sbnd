@@ -128,20 +128,6 @@ def fetch_and_process_entries(client, processor, entry_ids, max_workers=10, verb
 
     return points
 
-
-def parse_arguments():
-    parser = argparse.ArgumentParser(description='Run the SBND ECL update script.')
-    parser.add_argument('--after', type=str, default='7days',
-                        help='Time window for fetching recent entries (e.g. 7days, 30days).')
-    parser.add_argument('--limit', type=int, default=50,
-                        help='Max entries to fetch per category.')
-    parser.add_argument('-u', '--username', type=str, default=USERNAME, help='Username for authentication.')
-    parser.add_argument('-p', '--password', type=str, default=PASSWORD, help='Password for authentication.')
-    parser.add_argument('--verbose', action='store_true',
-                        help='Print entry details as they are processed.')
-    return parser.parse_args()
-
-
 def _get_qdrant_client():
     return QdrantClient(host=os.environ.get("QDRANT_HOST"), port=6333)
 
@@ -160,7 +146,7 @@ def ensure_collection_exists(qdrant_client, vector_size=768):
 
 
 
-def run_update(after='7days', limit=50, username="", password="", verbose=False):
+def run_updateSBND(after='7days', limit=50, username="", password="", verbose=False):
 
     try:
         logger.info("Initializing text processor and ElogFetcher client.")
@@ -206,6 +192,18 @@ def run_update(after='7days', limit=50, username="", password="", verbose=False)
         return False
 
 
+def parse_arguments():
+    parser = argparse.ArgumentParser(description='Run the SBND ECL update script.')
+    parser.add_argument('--after', type=str, default='7days',
+                        help='Time window for fetching recent entries (e.g. 7days, 30days).')
+    parser.add_argument('--limit', type=int, default=50,
+                        help='Max entries to fetch per category.')
+    parser.add_argument('-u', '--username', type=str, default=USERNAME, help='Username for authentication.')
+    parser.add_argument('-p', '--password', type=str, default=PASSWORD, help='Password for authentication.')
+    parser.add_argument('--verbose', action='store_true',
+                        help='Print entry details as they are processed.')
+    return parser.parse_args()
+
 if __name__ == "__main__":
     args = parse_arguments()
-    run_update(args.after, args.limit, args.username, args.password, args.verbose)
+    run_updateSBND(args.after, args.limit, args.username, args.password, args.verbose)

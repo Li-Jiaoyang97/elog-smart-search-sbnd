@@ -18,10 +18,8 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
-
 class SemanticSearch:
     def __init__(self, model_path, collection_name, qdrant_host, qdrant_port):
-        
         
         # Initialization: Sets up the Qdrant client and the SentenceTransformer model.
         # Prints a message confirming the setup details.
