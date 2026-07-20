@@ -9,6 +9,7 @@ Modes (pick one):
   --query TEXT         Semantic search — embed TEXT and return top matches
   --similar ID         Find entries most similar to entry ID
   --list-categories    List all unique category values and their counts
+  --id-range           Show the min/max indexed entry ID and the N most recent entries
 
 Options:
   --category CAT       Filter results by top_category (combine with --query or --similar)
@@ -19,6 +20,7 @@ Examples:
   python explore_db.py --query "CRT noise issue" --category CRT --top 5
   python explore_db.py --similar 8423
   python explore_db.py --list-categories
+  python explore_db.py --id-range --top 10
 """
 
 import os
@@ -183,6 +185,39 @@ def cmd_list_categories(qdrant):
     print()
 
 
+def cmd_id_range(qdrant, top_n=10):
+    """Scroll the whole collection to find the ID range and the most recent entries (highest ID)."""
+    print(f"\nScanning '{collection_name}' for ID range...\n")
+
+    points = []
+    offset = None
+    while True:
+        batch, offset = qdrant.scroll(
+            collection_name=collection_name,
+            limit=1000,
+            offset=offset,
+            with_payload=True,
+            with_vectors=False,
+        )
+        points.extend(batch)
+        if offset is None:
+            break
+
+    if not points:
+        print("No entries found.")
+        return
+
+    ids = [p.id for p in points]
+    print(f"Total entries indexed : {len(points)}")
+    print(f"Min ID                : {min(ids)}")
+    print(f"Max ID                : {max(ids)}")
+
+    print(f"\nTop {top_n} most recent entries (highest ID):\n")
+    newest = sorted(points, key=lambda p: p.id, reverse=True)[:top_n]
+    for i, point in enumerate(newest, 1):
+        _print_hit(i, point, show_score=False)
+
+
 def parse_arguments():
     parser = argparse.ArgumentParser(
         description="Explore the SBND ECL Qdrant database.",
@@ -193,6 +228,7 @@ def parse_arguments():
     mode.add_argument('--query',   type=str, metavar='TEXT', help='Semantic search query.')
     mode.add_argument('--similar', type=int, metavar='ID',   help='Find entries similar to this entry ID.')
     mode.add_argument('--list-categories', action='store_true', help='List all categories and counts.')
+    mode.add_argument('--id-range', action='store_true', help='Show the min/max indexed entry ID and the N most recent entries.')
 
     parser.add_argument('--category', type=str, default=None,
                         help='Filter results by top_category (use with --query or --similar).')
@@ -207,6 +243,8 @@ if __name__ == "__main__":
 
     if args.list_categories:
         cmd_list_categories(qdrant)
+    elif args.id_range:
+        cmd_id_range(qdrant, top_n=args.top)
     elif args.query:
         processor = TextProcessor(model_name=model_path)
         cmd_query(args, qdrant, processor)

@@ -37,7 +37,6 @@ def print_results(hit_ids: list[str]) -> None:
     print()
 
 def pick_and_open(searcher: SemanticSearch, hit_ids: list[str]) -> None:
-    """Let the user open individual results by number, one at a time."""
     if not hit_ids:
         return
     while True:
