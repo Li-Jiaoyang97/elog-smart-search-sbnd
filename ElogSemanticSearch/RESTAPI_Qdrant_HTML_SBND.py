@@ -25,6 +25,7 @@ from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 from ElogSemanticSearch.QdrantSearch.QdrantSearchSBND import SemanticSearch
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from fastapi import Depends, Request
 from ElogSemanticSearch.session_fetcherSBND import SessionFetcherSBND
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,8 +43,22 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# Mount static files directory
-app.mount("/static", StaticFiles(directory="/app/ElogSemanticSearch/static"), name="static")
+# Mount static files directory (production/Docker path - skipped locally if absent
+# so this app can still start for local dev/testing)
+_PROD_STATIC_DIR = "/app/ElogSemanticSearch/static"
+if os.path.isdir(_PROD_STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=_PROD_STATIC_DIR), name="static")
+
+# Plain-HTML UI for local/manual testing (see static_sbnd/index.html) - served
+# from the same FastAPI app so browser fetch() calls are same-origin (no CORS
+# setup needed for this).
+_SBND_UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static_sbnd")
+app.mount("/static_sbnd", StaticFiles(directory=_SBND_UI_DIR), name="static_sbnd")
+
+
+@app.get("/")
+def serve_sbnd_ui():
+    return FileResponse(os.path.join(_SBND_UI_DIR, "index.html"))
 
 
 def required_env(var_name: str) -> str:

@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>SBND Elog Semantic Search</title>
+<style>
+  /* Kept in one file on purpose: no build step, no npm, nothing to install.
+     You can open this file's source and read top-to-bottom - HTML structure,
+     then CSS look-and-feel, then JS behavior at the bottom. */
+  body {
+    font-family: -apple-system, "Segoe UI", Arial, sans-serif;
+    max-width: 720px;
+    margin: 2rem auto;
+    padding: 0 1rem;
+    color: #1a1a1a;
+  }
+  h1 { font-size: 1.4rem; }
+  fieldset {
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    margin-bottom: 1.2rem;
+    padding: 1rem;
+  }
+  legend { font-weight: 600; padding: 0 0.4rem; }
+  label { display: block; margin-top: 0.6rem; font-size: 0.9rem; color: #444; }
+  input, select {
+    width: 100%;
+    padding: 0.4rem;
+    margin-top: 0.2rem;
+    box-sizing: border-box;
+    font-size: 0.95rem;
+  }
+  .row { display: flex; gap: 0.6rem; }
+  .row > div { flex: 1; }
+  button {
+    margin-top: 0.9rem;
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 6px;
+    background: #2b5fd9;
+    color: white;
+    font-size: 0.95rem;
+    cursor: pointer;
+  }
+  button:disabled { background: #999; cursor: not-allowed; }
+  #status { font-size: 0.9rem; margin-top: 0.5rem; }
+  .error { color: #b00020; }
+  .ok { color: #1a7a3a; }
+  #results { margin-top: 1rem; }
+  #results ol { padding-left: 1.2rem; }
+  #results a { color: #2b5fd9; text-decoration: none; }
+  #results a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<h1>SBND Elog Semantic Search</h1>
+
+<!-- ── Login ────────────────────────────────────────────────────────────── -->
+<!-- The backend gates /search and /recommend behind a session created by
+     /login (see get_current_user() in RESTAPI_Qdrant_HTML_SBND.py). So this
+     form has to run first: it POSTs your Fermilab credentials once, and the
+     server hands back nothing except confirmation - it keeps track of who
+     you are internally, keyed by your username. -->
+<fieldset>
+  <legend>1. Log in</legend>
+  <label for="username">Fermilab username</label>
+  <input id="username" type="text" autocomplete="username" />
+  <label for="password">Password</label>
+  <input id="password" type="password" autocomplete="current-password" />
+  <button id="loginBtn" onclick="login()">Log in</button>
+  <div id="loginStatus"></div>
+</fieldset>
+
+<!-- ── Search ───────────────────────────────────────────────────────────── -->
+<fieldset id="searchBox" disabled>
+  <legend>2. Semantic search</legend>
+  <label for="query">Describe what you're looking for</label>
+  <input id="query" type="text" placeholder="e.g. beam off target CRT noise" />
+
+  <div class="row">
+    <div>
+      <label for="category">Category (optional)</label>
+      <input id="category" type="text" placeholder="e.g. CRT" />
+    </div>
+    <div>
+      <label for="limit">Max results</label>
+      <input id="limit" type="number" value="10" min="1" max="50" />
+    </div>
+  </div>
+
+  <label for="scoreThreshold">Minimum score (0 = no floor, let the server's adaptive filter decide)</label>
+  <input id="scoreThreshold" type="number" value="0" min="0" max="1" step="0.05" />
+
+  <button id="searchBtn" onclick="doSearch()">Search</button>
+</fieldset>
+
+<!-- ── Recommend ("find similar") ──────────────────────────────────────── -->
+<fieldset id="recommendBox" disabled>
+  <legend>3. Find similar entries</legend>
+  <label for="posIds">Entry ID(s) you already like (comma-separated)</label>
+  <input id="posIds" type="text" placeholder="e.g. 39728" />
+  <label for="negIds">Entry ID(s) to steer away from (optional)</label>
+  <input id="negIds" type="text" placeholder="e.g. 39001" />
+
+  <div class="row">
+    <div>
+      <label for="recCategory">Category (optional)</label>
+      <input id="recCategory" type="text" placeholder="e.g. CRT" />
+    </div>
+    <div>
+      <label for="recLimit">Max results</label>
+      <input id="recLimit" type="number" value="10" min="1" max="50" />
+    </div>
+  </div>
+
+  <button id="recommendBtn" onclick="doRecommend()">Find similar</button>
+</fieldset>
+
+<div id="results"></div>
+
+<script>
+// ── Config ──────────────────────────────────────────────────────────────
+// This UI is served BY the same FastAPI app it talks to (see the new "/"
+// route added in RESTAPI_Qdrant_HTML_SBND.py), so every fetch() below is
+// same-origin - no CORS setup needed, unlike serving this file from a
+// different port/host would require.
+const BASE_URL = "https://dbweb1.fnal.gov:8443/ECL/sbnd/E"; // same constant as base_url in the Python file, used only to build clickable links
+
+// Kept in memory only (a plain JS variable, not localStorage/cookies) so it
+// disappears the moment you refresh the page - deliberately not persisted.
+let currentUsername = null;
+
+// ── Helpers ─────────────────────────────────────────────────────────────
+
+function setStatus(el, message, isError) {
+  el.textContent = message;
+  el.className = isError ? "error" : "ok";
+}
+
+// Builds the same conditions_list shape construct_conditions_from_list()
+// expects server-side: [{"type": "category", "value": "..."}] and/or
+// [{"type": "range", "field": "creation_date", "value": {"gte": ..., "lte": ...}}]
+function buildConditions(category) {
+  const conditions = [];
+  if (category) {
+    conditions.push({ type: "category", value: category });
+  }
+  return conditions;
+}
+
+// Turns "39728, 39001" into the string "[39728, 39001]" - the backend does
+// ast.literal_eval() on pos_input/neg_input, so it expects a Python-literal
+// string, not a JSON array.
+function toIdListString(text) {
+  const ids = text.split(",").map((s) => s.trim()).filter(Boolean).map(Number);
+  return "[" + ids.join(", ") + "]";
+}
+
+function renderResults(hitIds) {
+  const box = document.getElementById("results");
+  if (!hitIds || hitIds.length === 0) {
+    box.innerHTML = "<p>No results.</p>";
+    return;
+  }
+  const items = hitIds
+    .map((id) => `<li><a href="${BASE_URL}/show?e=${id}" target="_blank">Entry ${id}</a></li>`)
+    .join("");
+  box.innerHTML = `<ol>${items}</ol>`;
+}
+
+// ── Actions ─────────────────────────────────────────────────────────────
+
+async function login() {
+  const username = document.getElementById("username").value.trim();
+  const password = document.getElementById("password").value;
+  const statusEl = document.getElementById("loginStatus");
+
+  if (!username || !password) {
+    setStatus(statusEl, "Enter both username and password.", true);
+    return;
+  }
+
+  document.getElementById("loginBtn").disabled = true;
+  setStatus(statusEl, "Logging in...", false);
+
+  try {
+    const res = await fetch("/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      setStatus(statusEl, data.detail || "Login failed.", true);
+      document.getElementById("loginBtn").disabled = false;
+      return;
+    }
+
+    currentUsername = username;
+    document.getElementById("password").value = ""; // clear it from the DOM once used
+    setStatus(statusEl, `Logged in as ${username}. Session lasts 1 hour.`, false);
+    document.getElementById("searchBox").disabled = false;
+    document.getElementById("recommendBox").disabled = false;
+  } catch (err) {
+    setStatus(statusEl, "Network error: " + err.message, true);
+    document.getElementById("loginBtn").disabled = false;
+  }
+}
+
+// Every authenticated call sends X-Username - this is exactly what
+// get_current_user() in the backend reads to look up your session.
+function authHeaders() {
+  return { "Content-Type": "application/json", "X-Username": currentUsername };
+}
+
+// If a session expired (403), send the user back to the login step instead
+// of leaving them stuck on a broken search/recommend form.
+function handleExpiredSession(statusText) {
+  currentUsername = null;
+  document.getElementById("searchBox").disabled = true;
+  document.getElementById("recommendBox").disabled = true;
+  setStatus(document.getElementById("loginStatus"), statusText, true);
+}
+
+async function doSearch() {
+  const query = document.getElementById("query").value.trim();
+  const category = document.getElementById("category").value.trim();
+  const limit = Number(document.getElementById("limit").value);
+  const scoreThreshold = Number(document.getElementById("scoreThreshold").value);
+  const resultsEl = document.getElementById("results");
+
+  if (!query) {
+    resultsEl.innerHTML = '<p class="error">Type something to search for.</p>';
+    return;
+  }
+
+  resultsEl.innerHTML = "<p>Searching...</p>";
+
+  try {
+    const res = await fetch("/search", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        query,
+        limit,
+        score_threshold: scoreThreshold,
+        conditions_list: buildConditions(category),
+      }),
+    });
+
+    if (res.status === 403) {
+      handleExpiredSession("Session expired - please log in again.");
+      return;
+    }
+    if (res.status === 404) {
+      resultsEl.innerHTML = "<p>No matching entries. Try lowering the score threshold or removing the category filter.</p>";
+      return;
+    }
+    const data = await res.json();
+    if (!res.ok) {
+      resultsEl.innerHTML = `<p class="error">${data.detail || "Search failed."}</p>`;
+      return;
+    }
+    renderResults(data.hit_ids);
+  } catch (err) {
+    resultsEl.innerHTML = `<p class="error">Network error: ${err.message}</p>`;
+  }
+}
+
+async function doRecommend() {
+  const posIds = document.getElementById("posIds").value.trim();
+  const negIds = document.getElementById("negIds").value.trim();
+  const category = document.getElementById("recCategory").value.trim();
+  const limit = Number(document.getElementById("recLimit").value);
+  const resultsEl = document.getElementById("results");
+
+  if (!posIds) {
+    resultsEl.innerHTML = '<p class="error">Enter at least one entry ID to base recommendations on.</p>';
+    return;
+  }
+
+  resultsEl.innerHTML = "<p>Searching...</p>";
+
+  try {
+    const res = await fetch("/recommend", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        pos_input: toIdListString(posIds),
+        neg_input: negIds ? toIdListString(negIds) : "",
+        limit,
+        score_threshold: 0, // recommend's adaptive_threshold_max does the real filtering
+        conditions_list: buildConditions(category),
+      }),
+    });
+
+    if (res.status === 403) {
+      handleExpiredSession("Session expired - please log in again.");
+      return;
+    }
+    const data = await res.json();
+    if (!res.ok) {
+      resultsEl.innerHTML = `<p class="error">${data.detail || "Recommend failed."}</p>`;
+      return;
+    }
+    if (data.message) {
+      resultsEl.innerHTML = `<p>${data.message}</p>`;
+      return;
+    }
+    renderResults(data.hit_ids);
+  } catch (err) {
+    resultsEl.innerHTML = `<p class="error">Network error: ${err.message}</p>`;
+  }
+}
+</script>
+</body>
+</html>

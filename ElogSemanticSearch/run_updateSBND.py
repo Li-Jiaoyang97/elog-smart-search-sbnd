@@ -145,7 +145,6 @@ def ensure_collection_exists(qdrant_client, vector_size=768):
         logger.info(f"Collection '{collection_name}' already exists.")
 
 
-
 def run_updateSBND(after='7days', limit=50, username="", password="", verbose=False):
 
     try:

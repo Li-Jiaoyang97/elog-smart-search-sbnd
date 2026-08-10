@@ -68,7 +68,6 @@ class Tools:
         self._client = None
         self._encoder = None
 
-    # ── lazy singletons ──────────────────────────────────────────────────────
 
     def _get_client(self) -> QdrantClient:
         if self._client is None:
