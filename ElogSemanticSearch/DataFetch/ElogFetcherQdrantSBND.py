@@ -12,12 +12,44 @@ and parses the returned XML into the dict format the pipeline expects.
 """
 
 import os
+import re
 from ECLConfig import ECL_CATEGORIES
 
 from ecl_api import ECL
 import xml.etree.ElementTree as ET
 from urllib.parse import quote
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# ECL sometimes serializes a raw '&' in subject/field text instead of escaping
+# it as '&amp;' (e.g. subject="PDS X-ARAPUCA & PMT tests"), which makes the
+# XML not well-formed. Escape only the offending bare ampersands so parsing
+# doesn't blow up on otherwise-valid entries.
+_UNESCAPED_AMP_RE = re.compile(r'&(?!amp;|lt;|gt;|apos;|quot;|#\d+;|#x[0-9a-fA-F]+;)')
+
+# ECL also serializes raw '"' inside attribute values instead of escaping them
+# as '&quot;' (e.g. subject="... removing "87" from the dictionary ..."),
+# which terminates the attribute value early and breaks well-formedness.
+# Every attribute in ECL's response starts at the beginning of a line as
+# name="value". A quote is treated as the *real* closing delimiter only if
+# what follows it looks like the next attribute starting or the tag closing
+# (rather than assuming it's simply the last quote on the line) — anything
+# else between the opening quote and that point is stray content to escape.
+_ATTR_LINE_RE = re.compile(
+    r'^(?P<indent>[ \t]*)(?P<name>[A-Za-z_][\w.:-]*)="(?P<value>.*?)"'
+    r'(?=[ \t]+[A-Za-z_][\w.:-]*="|[ \t]*/?>[ \t]*$|[ \t]*$)',
+    re.MULTILINE,
+)
+
+
+def _escape_inner_quotes(match):
+    value = match.group('value').replace('"', '&quot;')
+    return f"{match.group('indent')}{match.group('name')}=\"{value}\""
+
+
+def _sanitize_xml(xml_string):
+    xml_string = _ATTR_LINE_RE.sub(_escape_inner_quotes, xml_string)
+    return _UNESCAPED_AMP_RE.sub('&amp;', xml_string)
+
 
 class ElogFetcher:
     def __init__(self):
@@ -94,7 +126,7 @@ class ElogFetcher:
             if debug:
                 print(f"\n  [{category}] Encoded as: {encoded_cat}")
             rawtext = self.ecl.search(category=encoded_cat, limit=limit, after=after)
-            xml     = ET.fromstring(rawtext)
+            xml     = ET.fromstring(_sanitize_xml(rawtext))
             entries = xml.findall('./entry')
 
             if entries:
@@ -124,7 +156,7 @@ class ElogFetcher:
             try:
                 encoded = quote(category_name, safe='/-')
                 text = self.ecl.search(category=encoded, limit=limit, after=after)
-                xml = ET.fromstring(text)
+                xml = ET.fromstring(_sanitize_xml(text))
                 entries = xml.findall('./entry')
                 ids = [int(e.attrib['id']) for e in entries if e.attrib.get('id')]
                 if ids:
@@ -152,7 +184,7 @@ class ElogFetcher:
         try:
             encoded = quote(category, safe='/-')
             text = self.ecl.search(category=encoded, limit=limit, after=after)
-            xml = ET.fromstring(text)
+            xml = ET.fromstring(_sanitize_xml(text))
             entries = xml.findall('./entry')
             ids = sorted(
                 [int(e.attrib['id']) for e in entries if e.attrib.get('id')],
@@ -184,7 +216,7 @@ class ElogFetcher:
             for attempt in range(retries):
                 try:
                     text = self.ecl.search(category=encoded, limit=limit, after=after)
-                    xml = ET.fromstring(text)
+                    xml = ET.fromstring(_sanitize_xml(text))
                     entries = xml.findall('./entry')
                     ids = sorted(
                         [int(e.attrib['id']) for e in entries if e.attrib.get('id')],
@@ -223,7 +255,7 @@ class ElogFetcher:
           - Free-text entries   (e.g. BNB narrow bunch study)
         """
         try:
-            root = ET.fromstring(xml_string)
+            root = ET.fromstring(_sanitize_xml(xml_string))
         except ET.ParseError as e:
             print(f"Failed to parse XML for entry {entry_id}: {e}")
             return None

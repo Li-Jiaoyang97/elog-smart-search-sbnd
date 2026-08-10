@@ -7,7 +7,7 @@ Quick sanity-check for ElogFetcherQdrantSBND.ElogFetcher
 import os
 from DataFetch.ElogFetcherQdrantSBND import ElogFetcher
 
-with open('pwd.txt', 'r') as f:
+with open('../pwd.txt', 'r') as f:
     ecl_pwd = f.read().strip()  
 
 # ── Credentials (set env vars or hardcode for local testing) ──────────────────
