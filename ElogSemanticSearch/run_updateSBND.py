@@ -8,9 +8,9 @@ Sync SBND ECL entries into Qdrant. Serves two modes via the same
 checkpointed ID-walk engine:
 
   - Initial backfill: `--reset` (or a large `--max_id`) to walk from ID 1.
-  - Steady-state update (e.g. cron): run with defaults; the checkpoint in
-    init_checkpoint.json makes each run pick up only new entries since the
-    last run.
+  - Steady-state update (e.g. cron): run with defaults; the checkpoint file
+    (init_checkpoint_<COLLECTION_NAME>.json, one per collection) makes each
+    run pick up only new entries since the last run.
 
 Strategy:
   - Auto-detect the current max entry ID across all categories (via --after/
@@ -67,7 +67,7 @@ collection_name = os.environ.get("COLLECTION_NAME")
 if not collection_name:
     raise RuntimeError("Environment variable COLLECTION_NAME must be set.")
 
-CHECKPOINT_FILE = os.path.join(os.path.dirname(__file__), "init_checkpoint.json")
+CHECKPOINT_FILE = os.path.join(os.path.dirname(__file__), f"init_checkpoint_{collection_name}.json")
 
 # Entries whose subject contains any of these words (case-insensitive) are skipped.
 SKIP_SUBJECT_KEYWORDS = ["checklist"]
@@ -109,17 +109,19 @@ def load_checkpoint():
     if os.path.exists(CHECKPOINT_FILE):
         with open(CHECKPOINT_FILE) as f:
             data = json.load(f)
+        # Older checkpoint files predate the "dropped" counter.
+        data.setdefault("dropped", 0)
         logger.info(
             f"Resuming from checkpoint: last processed ID={data['last_id']}, "
-            f"stored={data['stored']}, skipped={data['skipped']}"
+            f"stored={data['stored']}, skipped={data['skipped']}, dropped={data['dropped']}"
         )
         return data
-    return {"last_id": 0, "stored": 0, "skipped": 0}
+    return {"last_id": 0, "stored": 0, "skipped": 0, "dropped": 0}
 
 
-def save_checkpoint(last_id, stored, skipped):
+def save_checkpoint(last_id, stored, skipped, dropped):
     with open(CHECKPOINT_FILE, 'w') as f:
-        json.dump({"last_id": last_id, "stored": stored, "skipped": skipped}, f)
+        json.dump({"last_id": last_id, "stored": stored, "skipped": skipped, "dropped": dropped}, f)
 
 
 # ── Max ID detection ──────────────────────────────────────────────────────────
@@ -176,7 +178,7 @@ def _get_qdrant_client():
     return QdrantClient(host=os.environ.get("QDRANT_HOST"), port=6333)
 
 
-def ensure_collection(qdrant_client, vector_size=768):
+def ensure_collection(qdrant_client, vector_size):
     existing = {c.name for c in qdrant_client.get_collections().collections}
     if collection_name not in existing:
         qdrant_client.create_collection(
@@ -205,6 +207,7 @@ def run_updateSBND(username, password, after='7days', limit=100, max_id=None,
     start_id   = checkpoint["last_id"] + 1
     stored     = checkpoint["stored"]
     skipped    = checkpoint["skipped"]
+    dropped    = checkpoint["dropped"]
 
     if start_id > max_id:
         logger.info("Checkpoint already at max ID — nothing to do.")
@@ -215,7 +218,7 @@ def run_updateSBND(username, password, after='7days', limit=100, max_id=None,
 
     if not dry_run:
         qdrant_client = _get_qdrant_client()
-        ensure_collection(qdrant_client)
+        ensure_collection(qdrant_client, vector_size=processor.model.get_sentence_embedding_dimension())
 
     pending_points = []  # accumulate PointStructs until batch_size reached
 
@@ -224,6 +227,7 @@ def run_updateSBND(username, password, after='7days', limit=100, max_id=None,
 
         # ── Parallel fetch ────────────────────────────────────────────────────
         fetch_results = {}
+        fetch_errors  = {}
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {executor.submit(fetcher.get_entry, eid): eid for eid in chunk_ids}
             for future in as_completed(futures):
@@ -233,13 +237,21 @@ def run_updateSBND(username, password, after='7days', limit=100, max_id=None,
                 except Exception as e:
                     logger.warning(f"ID {eid}: fetch error — {e}")
                     fetch_results[eid] = None
+                    fetch_errors[eid] = str(e)
 
         # ── Process in ID order ───────────────────────────────────────────────
         for eid in chunk_ids:
             entry = fetch_results.get(eid)
 
             if entry is None:
-                continue  # ID doesn't exist in ECL
+                dropped += 1
+                # fetch_errors[eid] set only if get_entry() raised - a bare None
+                # (no exception) means ECL returned no data for this ID, most
+                # often because the ID simply doesn't exist (normal, expected
+                # gaps in the sequence).
+                reason = fetch_errors.get(eid, "no data returned (likely nonexistent ID)")
+                logger.info(f"ID {eid}: dropped — fetch failed — {reason}")
+                continue
 
             if should_skip(entry):
                 skipped += 1
@@ -259,7 +271,8 @@ def run_updateSBND(username, password, after='7days', limit=100, max_id=None,
                 point = entry_to_point(entry, processor)
                 pending_points.append(point)
             except Exception as e:
-                logger.warning(f"ID {eid}: processing error — {e}")
+                dropped += 1
+                logger.warning(f"ID {eid}: dropped — processing error — {e}")
                 continue
 
             # Upsert when batch is full
@@ -268,26 +281,28 @@ def run_updateSBND(username, password, after='7days', limit=100, max_id=None,
                 stored += len(pending_points)
                 logger.info(
                     f"Upserted {len(pending_points)} points  |  "
-                    f"total stored={stored}  skipped={skipped}  last_id={eid}"
+                    f"total stored={stored}  skipped={skipped}  dropped={dropped}  last_id={eid}"
                 )
                 pending_points = []
 
         # Checkpoint at chunk boundary (skip entirely during --dry_run so a
         # preview run never permanently marks IDs as processed)
         if not dry_run:
-            save_checkpoint(chunk_ids[-1], stored, skipped)
+            save_checkpoint(chunk_ids[-1], stored, skipped, dropped)
         logger.info(
             f"Chunk done: IDs {chunk_ids[0]}–{chunk_ids[-1]}  |  "
-            f"stored={stored}  skipped={skipped}  pending={len(pending_points)}"
+            f"stored={stored}  skipped={skipped}  dropped={dropped}  pending={len(pending_points)}"
         )
 
     # Final partial batch
     if pending_points and not dry_run:
         qdrant_client.upsert(collection_name=collection_name, points=pending_points)
         stored += len(pending_points)
-        save_checkpoint(max_id, stored, skipped)
+        save_checkpoint(max_id, stored, skipped, dropped)
 
-    logger.info(f"Done.  Stored: {stored}  |  Skipped: {skipped}  |  Max ID: {max_id}")
+    logger.info(
+        f"Done.  Stored: {stored}  |  Skipped: {skipped}  |  Dropped: {dropped}  |  Max ID: {max_id}"
+    )
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────

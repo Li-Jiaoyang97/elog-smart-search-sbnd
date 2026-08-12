@@ -20,14 +20,18 @@ logger = logging.getLogger(__name__)
 
 
 class SemanticSearch:
-    def __init__(self, model_path, collection_name, qdrant_host, qdrant_port):
-        
+    def __init__(self, model_path, collection_name, qdrant_host, qdrant_port, query_prefix=""):
+
         # Initialization: Sets up the Qdrant client and the SentenceTransformer model.
         # Prints a message confirming the setup details.
-        
+
+        # query_prefix: prepended to search queries only (not documents). Needed
+        # for asymmetric models like mxbai-embed-large-v1, which expects
+        # "Represent this sentence for searching relevant passages: " on queries.
         self.client = QdrantClient(qdrant_host, port=qdrant_port)
         self.encoder = SentenceTransformer(model_path)
         self.collection_name = collection_name
+        self.query_prefix = query_prefix
         logging.info(f"SemanticSearch initialized with model {model_path} on {qdrant_host}:{qdrant_port} for collection '{collection_name}'.")
         
 
@@ -117,9 +121,8 @@ class SemanticSearch:
             # Returns a list of hit IDs and prints them. Handles exceptions with error messages.
             
             try:
-                print(f"Starting search with query: {search_query}")  
-                # retrieval_prompt = "Represent this sentence for searching relevant passages: "
-                # search_query = retrieval_prompt + search_query
+                print(f"Starting search with query: {search_query}")
+                search_query = self.query_prefix + search_query
                 print(f"Performing search with query: {search_query}, conditions: {conditions}, limit: {limit}, score_threshold: {score_threshold}")
                 filter_conditions = self.set_filter_conditions(conditions)
                 query_vector = self.encoder.encode(search_query).tolist()

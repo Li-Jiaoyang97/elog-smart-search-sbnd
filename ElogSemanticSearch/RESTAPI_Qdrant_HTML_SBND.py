@@ -30,7 +30,14 @@ from fastapi import Depends, Request
 from ElogSemanticSearch.session_fetcherSBND import SessionFetcherSBND
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI()
+app = FastAPI(
+    title="SBND Elog Semantic Search",
+    description=(
+        "Semantic search over the SBND ECL (electronic logbook). "
+        "Use /api/search to find logbook entries relevant to a natural-language query."
+    ),
+    version="1.0",
+)
 
 session_fetcher = SessionFetcherSBND()
 load_dotenv()
@@ -56,7 +63,7 @@ _SBND_UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static_
 app.mount("/static_sbnd", StaticFiles(directory=_SBND_UI_DIR), name="static_sbnd")
 
 
-@app.get("/")
+@app.get("/", include_in_schema=False)
 def serve_sbnd_ui():
     return FileResponse(os.path.join(_SBND_UI_DIR, "index.html"))
 
@@ -66,16 +73,34 @@ def required_env(var_name: str) -> str:
         return os.environ[var_name]
     raise RuntimeError(f"Environment variable {var_name} must be set.")
 
+# Two embedding models, loaded side by side for comparison. "mxbai" is the
+# default (matches the old single-searcher behavior via MODEL_PATH /
+# COLLECTION_NAME); "mpnet" is optional - it's only loaded if MPNET_MODEL_PATH
+# is set, so the API still starts in single-model deployments.
 searcher_configs = {
-    "All-MPNet-v2-Update": {
+    "mxbai": {
         "model_path": required_env("MODEL_PATH"),
         "collection_name": required_env("COLLECTION_NAME"),
         "host": os.environ["QDRANT_HOST"],
-        "port": 6333
-    }
+        "port": 6333,
+        # mxbai-embed-large-v1 is asymmetric: queries (not documents) need this
+        # prefix for the model to score retrieval properly.
+        "query_prefix": "Represent this sentence for searching relevant passages: ",
+    },
 }
+if os.environ.get("MPNET_MODEL_PATH"):
+    searcher_configs["mpnet"] = {
+        "model_path": os.environ["MPNET_MODEL_PATH"],
+        "collection_name": required_env("MPNET_COLLECTION_NAME"),
+        "host": os.environ["QDRANT_HOST"],
+        "port": 6333,
+        "query_prefix": "",  # all-mpnet-base-v2 is symmetric, no prefix
+    }
 
-searcher = None
+DEFAULT_MODEL = "mxbai"
+
+searchers = {}
+searcher = None  # default searcher, used by the legacy HTML-UI endpoints
 
 active_sessions = {}
 
@@ -122,23 +147,23 @@ def get_current_user(request: Request):
 
     return username
 
-def initialize_default_searcher():
-    model_key = "All-MPNet-v2-Update"
-    config = searcher_configs[model_key]
+def initialize_searchers():
     global searcher
-    searcher = SemanticSearch(
-        model_path=config["model_path"],
-        collection_name=config["collection_name"],
-        qdrant_host=config["host"],
-        qdrant_port=config["port"]
-    )
-    logging.debug(
-        f"Searcher initialized with model: {config['model_path']} on host: {config['host']}:{config['port']} for collection: {config['collection_name']}"
-    )
-    return f"Searcher initialized with default model: {config['model_path']} and collection: {config['collection_name']}"
+    for key, config in searcher_configs.items():
+        searchers[key] = SemanticSearch(
+            model_path=config["model_path"],
+            collection_name=config["collection_name"],
+            qdrant_host=config["host"],
+            qdrant_port=config["port"],
+            query_prefix=config["query_prefix"],
+        )
+        logger.info(
+            f"Searcher '{key}' initialized: model={config['model_path']}, collection={config['collection_name']}"
+        )
+    searcher = searchers[DEFAULT_MODEL]
+    return f"Searchers initialized: {list(searchers)} (default: {DEFAULT_MODEL})"
 
-default_searcher_message = initialize_default_searcher()
-print(default_searcher_message)
+print(initialize_searchers())
 
 def construct_conditions_from_list(conditions_list):
     # SBND's Qdrant payload only has subject/top_category/subcategory/creation_date
@@ -163,7 +188,7 @@ def construct_conditions_from_list(conditions_list):
     return conditions
 
 
-@app.post("/login")
+@app.post("/login", include_in_schema=False)
 async def login(request: LoginRequest):
     """
     Endpoint to authenticate a user and create an Elog session.
@@ -190,7 +215,7 @@ async def login(request: LoginRequest):
         raise HTTPException(status_code=401, detail=str(e))
 
 
-@app.post("/search")
+@app.post("/search", include_in_schema=False)
 def search(request: SearchRequest, username: str = Depends(get_current_user)):
 
     try:
@@ -224,7 +249,7 @@ def search(request: SearchRequest, username: str = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="An unexpected error occurred.")
 
 
-@app.post("/recommend")
+@app.post("/recommend", include_in_schema=False)
 def recommend(request: RecommendRequest, username: str = Depends(get_current_user)):
     import ast
 
@@ -247,7 +272,60 @@ def recommend(request: RecommendRequest, username: str = Depends(get_current_use
         return {"message": "No results found"}
 
 
-@app.post("/update")
+class ToolSearchRequest(BaseModel):
+    query: str
+    model: str = DEFAULT_MODEL  # "mxbai" or "mpnet" - which embedding model to search with
+    limit: int = 10
+
+
+@app.post(
+    "/api/search",
+    summary="Search the SBND logbook",
+    description=(
+        "Semantic search over SBND ECL logbook entries. Give a natural-language "
+        "description of what you're looking for (e.g. 'TPC power supply trips', "
+        "'purity monitor calibration issues'). Returns the most relevant entries "
+        "with their subject, category, date, and a link to read the full entry. "
+        "The optional 'model' field selects the embedding model: 'mxbai' "
+        "(default) or 'mpnet' - useful for comparing the two."
+    ),
+)
+def tool_search(request: ToolSearchRequest):
+    if request.model not in searchers:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown model '{request.model}'. Available: {list(searchers)}",
+        )
+    s = searchers[request.model]
+
+    # score_threshold=0.0: rely on the adaptive threshold inside perform_search
+    # rather than a fixed cutoff (the two models' score scales differ).
+    hit_ids = s.perform_search(request.query, [], request.limit, 0.0)
+    if not hit_ids:
+        return {"model": request.model, "results": [], "message": "No relevant entries found."}
+
+    points = s.client.retrieve(
+        collection_name=s.collection_name,
+        ids=[int(i) for i in hit_ids],
+        with_payload=True,
+    )
+    payload_by_id = {str(p.id): p.payload for p in points}
+
+    results = []
+    for eid in hit_ids:  # retrieve() doesn't preserve order; keep ranking from search
+        payload = payload_by_id.get(eid, {})
+        results.append({
+            "entry_id": eid,
+            "subject": payload.get("subject", ""),
+            "category": payload.get("top_category", ""),
+            "subcategory": payload.get("subcategory", ""),
+            "date": payload.get("creation_date", ""),
+            "url": f"{base_url}/show?e={eid}",
+        })
+    return {"model": request.model, "results": results}
+
+
+@app.post("/update", include_in_schema=False)
 async def update(
     background_tasks: BackgroundTasks,
     update_request: UpdateRequest,
