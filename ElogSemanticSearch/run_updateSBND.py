@@ -286,8 +286,19 @@ def run_updateSBND(username, password, after='7days', limit=100, max_id=None,
                 pending_points = []
 
         # Checkpoint at chunk boundary (skip entirely during --dry_run so a
-        # preview run never permanently marks IDs as processed)
+        # preview run never permanently marks IDs as processed). Any pending
+        # points must be flushed first: the checkpoint may never advance past
+        # entries that are still only in memory, or an interruption would lose
+        # them permanently (the resume skips past their IDs).
         if not dry_run:
+            if pending_points:
+                qdrant_client.upsert(collection_name=collection_name, points=pending_points)
+                stored += len(pending_points)
+                logger.info(
+                    f"Upserted {len(pending_points)} points  |  "
+                    f"total stored={stored}  skipped={skipped}  dropped={dropped}  last_id={chunk_ids[-1]}"
+                )
+                pending_points = []
             save_checkpoint(chunk_ids[-1], stored, skipped, dropped)
         logger.info(
             f"Chunk done: IDs {chunk_ids[0]}–{chunk_ids[-1]}  |  "
