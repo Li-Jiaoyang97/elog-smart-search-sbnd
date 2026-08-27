@@ -13,12 +13,39 @@ and parses the returned XML into the dict format the pipeline expects.
 
 import os
 import re
+import time
+import logging
 from ECLConfig import ECL_CATEGORIES
 
 from ecl_api import ECL
 import xml.etree.ElementTree as ET
 from urllib.parse import quote
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+logger = logging.getLogger(__name__)
+
+
+class EntryFetchError(Exception):
+    """
+    A fetch failed for a reason that is *not* "this entry doesn't exist".
+
+    Raised for transport-level problems (connection reset, timeout, HTTP
+    error). These are usually transient and worth retrying, so callers can
+    tell them apart from a genuine gap in the ID sequence — which is signalled
+    by get_entry() returning None.
+    """
+
+
+class EntryParseError(EntryFetchError):
+    """
+    ECL returned data but it could not be parsed into an entry.
+
+    Deterministic: retrying sends the identical request and gets the identical
+    unparseable bytes back, so the retry loop deliberately does not catch this.
+    Subclasses EntryFetchError so callers that only care about "did the fetch
+    fail" can catch the parent.
+    """
+
 
 # ECL sometimes serializes a raw '&' in subject/field text instead of escaping
 # it as '&amp;' (e.g. subject="PDS X-ARAPUCA & PMT tests"), which makes the
@@ -73,15 +100,15 @@ class ElogFetcher:
             if not test:
                 raise Exception("Authentication succeeded but session returned no data — likely bad credentials.")
 
-            print("Authentication successful.")
+            logger.info("Authentication successful.")
             return True
 
         except Exception as e:
-            print(f"Authentication failed: {e}")
+            logger.error(f"Authentication failed: {e}")
             self.ecl = None
             return False
         
-    def get_entry(self, entry_id):
+    def get_entry(self, entry_id, retries=3, backoff=2.0):
         """
         Fetch a single elog entry by ID and return it as a dict.
 
@@ -93,24 +120,49 @@ class ElogFetcher:
             creation_date - str  (e.g. "03/18/2026 10:04:46")
             comments      - list of dicts with keys 'text' and 'modified_date'
 
-        Returns None if the entry could not be fetched.
+        Returns None ONLY when ECL has no entry at this ID — i.e. a genuine gap
+        in the sequence, which is normal and expected.
+
+        Raises:
+            EntryParseError - ECL returned data that could not be parsed.
+            EntryFetchError - the request itself failed (transport, auth).
+
+        This distinction matters: callers count a None as a harmless gap, so
+        folding failures into it silently discards real entries. Transport
+        errors are retried up to `retries` times with exponential backoff
+        (matching get_entry_ids_allCategories); parse errors are not, since
+        the same bytes would come back.
         """
         if self.ecl is None:
-            print("Session not authenticated. Call create_authenticated_session() first.")
-            return None
+            raise EntryFetchError(
+                "Session not authenticated. Call create_authenticated_session() first."
+            )
 
-        try:
-            xml_string = self.ecl.get_entry(entry_id=int(entry_id))
+        delay = backoff
+        for attempt in range(1, retries + 1):
+            try:
+                xml_string = self.ecl.get_entry(entry_id=int(entry_id))
+            except Exception as e:
+                if attempt < retries:
+                    logger.warning(
+                        f"Entry {entry_id}: fetch attempt {attempt}/{retries} failed "
+                        f"({type(e).__name__}: {e}), retrying in {delay}s..."
+                    )
+                    time.sleep(delay)
+                    delay *= 2
+                    continue
+                raise EntryFetchError(
+                    f"Failed to fetch entry {entry_id} after {retries} attempts: "
+                    f"{type(e).__name__}: {e}"
+                ) from e
 
             if not xml_string:
-                print(f"No data returned for entry ID {entry_id}.")
+                logger.debug(f"No data returned for entry ID {entry_id} (nonexistent).")
                 return None
 
+            # Outside the try: a parse failure must not be retried, and must not
+            # be reported as a transport error.
             return self._parse_entry(entry_id, xml_string)
-
-        except Exception as e:
-            print(f"Failed to fetch entry {entry_id}: {e}")
-            return None
 
     def check_most_recent_entry_perCategory(self, category='Shift', after="1days", limit=1, debug=False):
         """
@@ -118,7 +170,7 @@ class ElogFetcher:
         Useful for determining the range to ingest.
         """
         if self.ecl is None:
-            print("Session not authenticated. Call create_authenticated_session() first.")
+            logger.error("Session not authenticated. Call create_authenticated_session() first.")
             return None
         
         try:
@@ -136,16 +188,16 @@ class ElogFetcher:
                 if entry_id:
                     return int(entry_id)
 
-            print("Could not determine most recent entry ID.")
+            logger.warning("Could not determine most recent entry ID.")
             return None
 
         except Exception as e:
-            print(f"Failed to get most recent entry: {e}")
+            logger.error(f"Failed to get most recent entry: {e}")
             return None
 
     def check_most_recent_entries_allCategories(self, categories=None, after='7days', limit=5, debug=False):
         if self.ecl is None:
-            print("Session not authenticated.")
+            logger.error("Session not authenticated.")
             return None
 
         if categories is None:
@@ -169,7 +221,7 @@ class ElogFetcher:
                         print(f"  [{category_name}] No entries found")
             except Exception as e:
                 results[category_name] = None
-                print(f"  [{category_name}] Exception: {type(e).__name__}: {e}")
+                logger.warning(f"  [{category_name}] Exception: {type(e).__name__}: {e}")
 
         return results
 
@@ -178,7 +230,7 @@ class ElogFetcher:
         Return a descending-sorted list of entry IDs for a single category.
         """
         if self.ecl is None:
-            print("Session not authenticated.")
+            logger.error("Session not authenticated.")
             return []
 
         try:
@@ -194,7 +246,7 @@ class ElogFetcher:
                 print(f"  [{category}] Found {len(ids)} entries")
             return ids
         except Exception as e:
-            print(f"  [{category}] Exception: {type(e).__name__}: {e}")
+            logger.warning(f"  [{category}] Exception: {type(e).__name__}: {e}")
             return []
 
     def get_entry_ids_allCategories(self, categories=None, after='7days', limit=50, debug=False, max_workers=10):
@@ -204,7 +256,7 @@ class ElogFetcher:
         Category searches run in parallel (max_workers threads).
         """
         if self.ecl is None:
-            print("Session not authenticated.")
+            logger.error("Session not authenticated.")
             return {}
 
         if categories is None:
@@ -227,11 +279,11 @@ class ElogFetcher:
                     return category_name, ids
                 except Exception as e:
                     if attempt < retries - 1:
-                        print(f"  [{category_name}] Attempt {attempt+1} failed ({type(e).__name__}), retrying in {backoff}s...")
+                        logger.warning(f"  [{category_name}] Attempt {attempt+1} failed ({type(e).__name__}), retrying in {backoff}s...")
                         time.sleep(backoff)
                         backoff *= 2
                     else:
-                        print(f"  [{category_name}] Exception after {retries} attempts: {type(e).__name__}: {e}")
+                        logger.error(f"  [{category_name}] Exception after {retries} attempts: {type(e).__name__}: {e}")
                         return category_name, []
 
         result = {}
@@ -257,8 +309,11 @@ class ElogFetcher:
         try:
             root = ET.fromstring(_sanitize_xml(xml_string))
         except ET.ParseError as e:
-            print(f"Failed to parse XML for entry {entry_id}: {e}")
-            return None
+            # Raise rather than return None: ECL *did* return data for this ID,
+            # so the entry exists and silently treating it as a gap would lose it.
+            raise EntryParseError(
+                f"Failed to parse XML for entry {entry_id}: {e}"
+            ) from e
 
         # ── Header fields from XML attributes ────────────────────────────────
         #author        = root.attrib.get('author', '')

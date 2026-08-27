@@ -1,24 +1,23 @@
 # FastAPI installs
-fastapi==0.110.2
-uvicorn[standard]==0.29.0
-orjson==3.10.3
-pydantic==2.7.1
-python-multipart==0.0.9
+fastapi==0.136.3
+uvicorn[standard]==0.41.0
+orjson==3.11.9
+pydantic==2.13.4
+python-multipart==0.0.27
 python-dotenv==1.0.1
 
-#Sentence embedding + reranking (cpu-only)
-sentence-transformers==2.6.1
+# Sentence embedding + reranking. Versions pinned to match venv-semanticsearch
+# (the environment actually used for local dev) - older sentence-transformers/
+# transformers can't load models saved locally with the newer library (e.g.
+# mxbai-embed-large-v1's modules.json uses newer module paths).
+sentence-transformers==5.5.1
 qdrant-client==1.8.1
-transformers==4.41.1
-tokenizers==0.19.1
-
-
-# cpu torch
-#torch==2.2.0+cpu
--f https://download.pytorch.org/whl/torch_stable.html
+transformers==5.5.4
+tokenizers==0.22.2
+torch==2.11.0
 
 # HTML and text cleaning
-beautifulsoup4==4.12.3
+beautifulsoup4==4.14.3
 html5lib==1.1
 lxml==4.9.4
 
@@ -27,8 +26,8 @@ lxml==4.9.4
 ecl-api==0.0.3
 
 #data tools
-pandas==2.2.2
+pandas==3.0.3
 python-dateutil==2.9.0.post0
-numpy==1.26.4
+numpy==2.4.4
 pytest==8.2.2 #Honestly, this is needed to make qdrant work, not sure why
 

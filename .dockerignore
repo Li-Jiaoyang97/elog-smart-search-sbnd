@@ -1,0 +1,18 @@
+.git
+.gitignore
+# Local-only config; containers get their env from docker-compose.yml
+.env
+venv-semanticsearch/
+.webui_secret_key
+
+# Models are bind-mounted at runtime (see docker-compose.yml) instead of
+# baked into the image, so swapping embedding models doesn't need a rebuild.
+ElogSemanticSearch/models/*
+!ElogSemanticSearch/models/.gitkeep
+
+**/__pycache__
+**/*.pyc
+
+ElogSemanticSearch/elog_map.html
+ElogSemanticSearch/pwd.txt
+ElogSemanticSearch/DebugScripts/

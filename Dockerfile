@@ -31,9 +31,8 @@ COPY --from=builder /install /usr/local
 
 # Copy application files
 COPY ElogSemanticSearch /app/ElogSemanticSearch
-COPY .env /app/.env
-# COPY certs /certs  
+# COPY certs /certs
 
 EXPOSE 8000
 
-CMD ["python", "-m", "uvicorn", "ElogSemanticSearch.RESTAPI_Qdrant_HTML:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "uvicorn", "ElogSemanticSearch.RESTAPI_Qdrant_HTML_SBND:app", "--host", "0.0.0.0", "--port", "8000"]

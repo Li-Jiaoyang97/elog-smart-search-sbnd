@@ -1,0 +1,24 @@
+2026-08-27 17:25:56,809 - __main__ - INFO - Logging to file: /Users/jiaoyang/Work/AIML/Operation/elog-smart-search/ElogSemanticSearch/logs/update_Elog_collection_768_METADATA_20260827_172556.log
+2026-08-27 17:25:56,810 - __main__ - INFO - Resuming from checkpoint: last processed ID=40836, stored=8869, skipped=325, dropped=9
+2026-08-27 17:25:56,824 - sentence_transformers.base.model - INFO - No device provided, using mps
+2026-08-27 17:25:56,824 - sentence_transformers.base.model - INFO - Loading SentenceTransformer model from /Users/jiaoyang/Work/AIML/Operation/elog-smart-search/ElogSemanticSearch/models/all-mpnet-base-v2.
+2026-08-27 17:25:56,999 - httpx - INFO - HTTP Request: GET http://localhost:6333/collections "HTTP/1.1 200 OK"
+2026-08-27 17:25:57,001 - httpx - INFO - HTTP Request: GET http://localhost:6333/collections/Elog_collection_768_METADATA "HTTP/1.1 200 OK"
+2026-08-27 17:25:57,002 - __main__ - INFO - Collection 'Elog_collection_768_METADATA' already exists (dim=768) — will upsert into it.
+2026-08-27 17:25:57,005 - httpx - INFO - HTTP Request: POST http://localhost:6333/collections/Elog_collection_768_METADATA/points/scroll "HTTP/1.1 200 OK"
+2026-08-27 17:25:57,010 - httpx - INFO - HTTP Request: POST http://localhost:6333/collections/Elog_collection_768_METADATA/points/scroll "HTTP/1.1 200 OK"
+2026-08-27 17:25:57,014 - httpx - INFO - HTTP Request: POST http://localhost:6333/collections/Elog_collection_768_METADATA/points/scroll "HTTP/1.1 200 OK"
+2026-08-27 17:25:57,017 - httpx - INFO - HTTP Request: POST http://localhost:6333/collections/Elog_collection_768_METADATA/points/scroll "HTTP/1.1 200 OK"
+2026-08-27 17:25:57,020 - httpx - INFO - HTTP Request: POST http://localhost:6333/collections/Elog_collection_768_METADATA/points/scroll "HTTP/1.1 200 OK"
+2026-08-27 17:25:57,024 - httpx - INFO - HTTP Request: POST http://localhost:6333/collections/Elog_collection_768_METADATA/points/scroll "HTTP/1.1 200 OK"
+2026-08-27 17:25:57,029 - httpx - INFO - HTTP Request: POST http://localhost:6333/collections/Elog_collection_768_METADATA/points/scroll "HTTP/1.1 200 OK"
+2026-08-27 17:25:57,032 - httpx - INFO - HTTP Request: POST http://localhost:6333/collections/Elog_collection_768_METADATA/points/scroll "HTTP/1.1 200 OK"
+2026-08-27 17:25:57,035 - httpx - INFO - HTTP Request: POST http://localhost:6333/collections/Elog_collection_768_METADATA/points/scroll "HTTP/1.1 200 OK"
+2026-08-27 17:25:57,036 - __main__ - INFO - Repair scope IDs 40438–40836: 66 present, 333 to probe (cache: 0 nonexistent, 0 skipped).
+2026-08-27 17:25:57,182 - DataFetch.ElogFetcherQdrantSBND - INFO - Authentication successful.
+2026-08-27 17:25:57,209 - DataFetch.ElogFetcherQdrantSBND - WARNING - Entry 40438: fetch attempt 1/3 failed (ConnectionError: ('Connection aborted.', ConnectionResetError(54, 'Connection reset by peer'))), retrying in 2.0s...
+2026-08-27 17:25:59,318 - DataFetch.ElogFetcherQdrantSBND - WARNING - Entry 40555: fetch attempt 1/3 failed (ConnectionError: ('Connection aborted.', ConnectionResetError(54, 'Connection reset by peer'))), retrying in 2.0s...
+2026-08-27 17:26:01,420 - DataFetch.ElogFetcherQdrantSBND - WARNING - Entry 40678: fetch attempt 1/3 failed (ConnectionError: ('Connection aborted.', ConnectionResetError(54, 'Connection reset by peer'))), retrying in 2.0s...
+2026-08-27 17:26:03,536 - DataFetch.ElogFetcherQdrantSBND - WARNING - Entry 40804: fetch attempt 1/3 failed (ConnectionError: ('Connection aborted.', ConnectionResetError(54, 'Connection reset by peer'))), retrying in 2.0s...
+2026-08-27 17:26:03,542 - DataFetch.ElogFetcherQdrantSBND - WARNING - Entry 40811: fetch attempt 1/3 failed (ConnectionError: ('Connection aborted.', ConnectionResetError(54, 'Connection reset by peer'))), retrying in 2.0s...
+2026-08-27 17:26:05,609 - __main__ - INFO - Repair done (live).  Repaired: 0  |  Skipped: 333  |  Nonexistent: 0  |  Unresolved: 0
