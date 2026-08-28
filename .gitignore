@@ -6,3 +6,14 @@ ElogSemanticSearch/pwd.txt
 To do list.txt
 QdrantDockerFile/qdrant_storage/
 venv-semanticsearch/
+ElogSemanticSearch/*.json
+qdrant_storage/
+ElogSemanticSearch/logs
+
+# Generated artifacts — rebuild with DebugScripts/visualize_db.py
+ElogSemanticSearch/elog_map_*.html
+
+# Build/OS noise
+__pycache__/
+*.pyc
+.DS_Store
