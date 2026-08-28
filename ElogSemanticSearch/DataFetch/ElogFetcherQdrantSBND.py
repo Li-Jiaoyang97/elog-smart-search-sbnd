@@ -53,9 +53,13 @@ class EntryParseError(EntryFetchError):
 # doesn't blow up on otherwise-valid entries.
 _UNESCAPED_AMP_RE = re.compile(r'&(?!amp;|lt;|gt;|apos;|quot;|#\d+;|#x[0-9a-fA-F]+;)')
 
-# ECL also serializes raw '"' inside attribute values instead of escaping them
-# as '&quot;' (e.g. subject="... removing "87" from the dictionary ..."),
-# which terminates the attribute value early and breaks well-formedness.
+# ECL also serializes raw '"' and '<' inside attribute values instead of
+# escaping them as '&quot;' / '&lt;' (e.g. subject="... removing "87" from the
+# dictionary ...", or subject="replace <TPC> board"), which terminates the
+# attribute value early — or is simply an invalid token — and breaks
+# well-formedness. Note this covers attribute values only: a bare '<' in
+# element *text* is indistinguishable from a real tag without knowing the
+# schema, so it is left alone rather than guessed at.
 # Every attribute in ECL's response starts at the beginning of a line as
 # name="value". A quote is treated as the *real* closing delimiter only if
 # what follows it looks like the next attribute starting or the tag closing
@@ -68,13 +72,32 @@ _ATTR_LINE_RE = re.compile(
 )
 
 
-def _escape_inner_quotes(match):
-    value = match.group('value').replace('"', '&quot;')
+def _escape_attr_value(match):
+    """
+    Escape everything ECL leaves raw inside an attribute value.
+
+    '<' is the one that actually breaks parsing — it is never legal in an
+    attribute value, so a subject like "replace <TPC> board" or "voltage < 5kV"
+    makes the whole entry unparseable. '>' is legal there and parses fine
+    either way; it is escaped only so the value round-trips canonically.
+
+    Escaping is safe against the structural markup because _ATTR_LINE_RE keeps
+    the tag's own '>' out of the captured value — it appears only in the
+    zero-width lookahead — so this can never rewrite a real tag delimiter.
+
+    Order does not matter: none of the replacements introduces a character
+    another one matches, and the bare-'&' pass that follows in _sanitize_xml
+    deliberately skips the entities produced here.
+    """
+    value = (match.group('value')
+             .replace('"', '&quot;')
+             .replace('<', '&lt;')
+             .replace('>', '&gt;'))
     return f"{match.group('indent')}{match.group('name')}=\"{value}\""
 
 
 def _sanitize_xml(xml_string):
-    xml_string = _ATTR_LINE_RE.sub(_escape_inner_quotes, xml_string)
+    xml_string = _ATTR_LINE_RE.sub(_escape_attr_value, xml_string)
     return _UNESCAPED_AMP_RE.sub('&amp;', xml_string)
 
 

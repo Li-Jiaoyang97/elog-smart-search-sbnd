@@ -33,6 +33,23 @@ Counters:
   `failed` IDs are recorded in the checkpoint's `dropped_ids` and retried on the
   next run.
 
+  `stored` is reconciled against the collection's real point count every time
+  the checkpoint is written, because it is not the only thing that can put a
+  point in the collection: --repair writes points the ingest counter never
+  sees, and so does any ad-hoc backfill. An incrementing counter drifts from
+  the collection the moment anything else writes to it, so the collection —
+  not the counter — is treated as the source of truth. Point IDs are entry
+  IDs, so upserts are idempotent and the count is directly comparable.
+
+  `skipped`/`dropped` have no equivalent live source, so during a run they stay
+  incremental tallies: --repair settles them for the IDs it resolves and prunes
+  those from `dropped_ids` so the next run stops retrying them, but it will not
+  guess at IDs it cannot prove it is allowed to move. --recount is the way to
+  make them true again: it counts per-ID ground truth across the collection,
+  the repair sidecar and `dropped_ids`, and only writes when those account for
+  every ID in range. Use it after a full --repair, or any time the counters
+  have been reset or interrupted.
+
 Usage:
   python run_updateSBND.py                  # steady-state update, auto-detect max ID
   python run_updateSBND.py --max_id 12000   # override max ID
@@ -40,6 +57,9 @@ Usage:
   python run_updateSBND.py --reset          # delete checkpoint and start over (initial backfill)
   python run_updateSBND.py --repair --dry_run          # preview what repair would recover
   python run_updateSBND.py --repair --repair_from 40438 --repair_to 40836
+  python run_updateSBND.py --reconcile      # only re-sync `stored` to the live point count
+  python run_updateSBND.py --recount --dry_run   # report true stored/skipped/dropped
+  python run_updateSBND.py --recount        # ...and write them to the checkpoint
 
 @author: haydenh
 @modified by jiaoyang for SBND ECL
@@ -216,17 +236,295 @@ def load_checkpoint():
     return _empty_checkpoint()
 
 
-def save_checkpoint(last_id, stored, skipped, dropped, dropped_ids=None):
+def live_points_count(qdrant_client=None):
+    """
+    Exact number of points in the collection, or None if Qdrant can't be read.
+
+    Never raises: a checkpoint write must not fail just because the count could
+    not be confirmed. Losing the checkpoint costs a full re-walk; losing the
+    reconciliation costs a stale counter that the next write fixes anyway.
+    """
+    try:
+        client = qdrant_client or _get_qdrant_client()
+        return client.get_collection(collection_name).points_count
+    except Exception as e:
+        logger.warning(
+            f"Could not read the live point count from Qdrant "
+            f"({type(e).__name__}: {e}) — keeping the in-memory `stored` counter."
+        )
+        return None
+
+
+def reconcile_stored(qdrant_client=None):
+    """
+    Force the checkpoint's `stored` to the collection's real point count.
+
+    Standalone counterpart to the reconciliation save_checkpoint() does inline,
+    for the paths that write points without going through it — --repair, and
+    any manual backfill. Returns the reconciled count, or None if unavailable.
+    """
+    live = live_points_count(qdrant_client)
+    if live is None:
+        return None
+
+    data = load_checkpoint_raw()
+    before = data.get("stored", 0)
+    if before == live:
+        logger.info(f"Checkpoint `stored` already matches the collection ({live}).")
+        return live
+
+    data["stored"] = live
+    _atomic_write_json(CHECKPOINT_FILE, data)
+    logger.info(
+        f"Checkpoint `stored` reconciled against '{collection_name}': "
+        f"{before} → {live} ({live - before:+d})."
+    )
+    return live
+
+
+def recount(id_from=None, id_to=None, qdrant_client=None, state_path=None):
+    """
+    Rebuild `stored`/`skipped`/`dropped` from per-ID ground truth.
+
+    The ingest counters are running tallies: they only ever see what one walk
+    did, so a reset, an interruption or a write from any other path leaves them
+    describing a collection that no longer exists. (Both checkpoints here were
+    zeroed at some point — `skipped` counted only IDs past the reset while
+    `stored` covered everything, so the two were never addable.)
+
+    There is now enough recorded per ID to stop tallying and start counting.
+    Every ID in a probed range lands in exactly one of four classes:
+
+        present in Qdrant                       → stored
+        repair sidecar `skipped`                → skipped
+        repair sidecar `nonexistent`            → dropped, as absent
+        checkpoint `dropped_ids`                → dropped, as failed
+
+    which is also the correctness check: the four are disjoint and must cover
+    the range exactly. A shortfall means those IDs were never probed and
+    `skipped`/`dropped` are not recountable — the answer would be a guess, so
+    the caller reports the gap and leaves them alone rather than producing a
+    confident wrong number. An overlap means two sources claim the same ID and
+    one is stale. `stored` is unaffected by either: it comes from the
+    collection alone and stays derivable no matter how little was probed.
+
+    Nothing here contacts ECL; it is pure arithmetic over what is already on
+    disk. Returns a report dict; `report["complete"]` says whether it adds up.
+    """
+    qdrant_client = qdrant_client or _get_qdrant_client()
+    data = load_checkpoint_raw()
+    # Note this silently drops the cached `skipped` bucket if the skip rules
+    # changed since it was written — correct, and it surfaces here as a large
+    # unclassified count rather than a plausible-looking total.
+    state = load_repair_state(state_path)
+
+    present = scroll_present_ids(qdrant_client)
+    if id_to is None:
+        id_to = data.get("last_id", 0)
+    if id_from is None:
+        id_from = min(present) if present else 1
+
+    rng = set(range(id_from, id_to + 1))
+    classes = {
+        "stored":      present & rng,
+        "skipped":     set(state["skipped"]) & rng,
+        "nonexistent": set(state["nonexistent"]) & rng,
+        "failing":     (set(data["dropped_ids"]["error"])
+                        | set(data["dropped_ids"]["parse"])) & rng,
+    }
+
+    names = list(classes)
+    overlaps = {
+        f"{a}+{b}": sorted(classes[a] & classes[b])
+        for i, a in enumerate(names) for b in names[i + 1:]
+        if classes[a] & classes[b]
+    }
+    unclassified = rng - set().union(*classes.values())
+    # The checkpoint's counters describe the whole collection, so a range that
+    # leaves points out cannot supply them — its `stored` would be the count of
+    # a slice. Such a range is still worth reporting, just never worth writing.
+    outside_range = present - rng
+
+    report = {
+        "id_from": id_from, "id_to": id_to, "range_size": len(rng),
+        "counts": {k: len(v) for k, v in classes.items()},
+        "unclassified": len(unclassified),
+        "unclassified_sample": sorted(unclassified)[:20],
+        "overlaps": overlaps,
+        "outside_range": len(outside_range),
+        "complete": not unclassified and not overlaps and not outside_range,
+    }
+    report["stored"]  = report["counts"]["stored"]
+    report["skipped"] = report["counts"]["skipped"]
+    report["dropped"] = report["counts"]["nonexistent"] + report["counts"]["failing"]
+    return report
+
+
+def apply_recount(report, qdrant_client=None):
+    """
+    Write whatever the recount could establish. last_id/dropped_ids untouched.
+
+    The three counters do not need the same evidence. `stored` is derivable
+    from the collection alone, so it is written either way — that is exactly
+    what --reconcile does, and why --recount can stand in for it. `skipped` and
+    `dropped` additionally need every ID in range accounted for, and are left
+    alone when they are not: an unprobed range yields a wrong number, not an
+    approximate one, and a wrong number that looks authoritative is worse than
+    the stale one it replaced.
+    """
+    if not report["complete"]:
+        logger.info(
+            "Recount incomplete — writing `stored` only; `skipped`/`dropped` "
+            "left untouched until the range is fully probed."
+        )
+        reconcile_stored(qdrant_client)
+        return load_checkpoint_raw()
+
+    data = load_checkpoint_raw()
+    before = {k: data.get(k, 0) for k in ("stored", "skipped", "dropped")}
+    data.update({k: report[k] for k in ("stored", "skipped", "dropped")})
+    _atomic_write_json(CHECKPOINT_FILE, data)
+    logger.info(
+        "Checkpoint recounted: "
+        + "  ".join(f"{k} {before[k]}→{report[k]}"
+                    for k in ("stored", "skipped", "dropped"))
+    )
+    return data
+
+
+def log_recount(report):
+    """Human-readable recount report."""
+    c = report["counts"]
+    logger.info(
+        f"Recount over IDs {report['id_from']}–{report['id_to']} "
+        f"({report['range_size']} IDs), counted per ID from disk:"
+    )
+    logger.info(f"    stored       {c['stored']:>7}   points in the collection")
+    logger.info(f"    skipped      {c['skipped']:>7}   repair sidecar")
+    logger.info(f"    dropped      {report['dropped']:>7}   "
+                f"{c['nonexistent']} absent (sidecar) + {c['failing']} failing (dropped_ids)")
+
+    accounted = report["range_size"] - report["unclassified"]
+    logger.info(f"    accounted    {accounted:>7} / {report['range_size']}")
+
+    if report["outside_range"]:
+        logger.warning(
+            f"{report['outside_range']} point(s) sit outside {report['id_from']}–"
+            f"{report['id_to']} and are not included in `stored`. Widen the range "
+            f"with --repair_from/--repair_to to cover them."
+        )
+    for pair, ids in report["overlaps"].items():
+        logger.warning(
+            f"{len(ids)} ID(s) classified as both {pair} — one source is stale: {ids[:20]}"
+        )
+    if report["unclassified"]:
+        logger.warning(
+            f"{report['unclassified']} ID(s) in range were never probed, so this range "
+            f"cannot be recounted. Run a full repair over it first "
+            f"(--repair --repair_from {report['id_from']} --repair_to {report['id_to']}), "
+            f"then recount. Sample: {report['unclassified_sample']}"
+        )
+
+
+def apply_repair_to_checkpoint(repaired_ids, skipped_ids, nonexistent_ids,
+                               unresolved_ids, qdrant_client=None):
+    """
+    Fold a repair pass's outcome into the checkpoint. One atomic write.
+
+    A repair resolves IDs the ingest loop had given up on, so leaving the
+    checkpoint untouched strands two things: `stored` reads low (see
+    reconcile_stored), and `dropped_ids` still lists IDs the repair has since
+    settled — which the next normal run would dutifully re-fetch.
+
+    Membership in `dropped_ids` is a reliable ledger: every ID that reaches it
+    did so on a path that also did `dropped += 1` (the two call sites in the
+    ingest loop), so an ID found there provably accounts for one unit of
+    `dropped`. That is what makes the arithmetic below safe. IDs *not* in the
+    list are ambiguous — an absent ID was counted into `dropped`, a filtered
+    one into `skipped`, and nothing on disk distinguishes them — so they are
+    deliberately left alone rather than guessed at.
+
+    Per class, mirroring what the retry pass in run_updateSBND() does:
+
+      repaired    now has a point.  dropped -= 1 (if it was on the ledger)
+      skipped     produces no point, but belongs to `skipped`, not `dropped`:
+                  dropped -= 1 and skipped += 1 (if it was on the ledger)
+      nonexistent still a genuine drop — ECL has no such entry — so `dropped`
+                  keeps counting it; it is only dropped from the retry list,
+                  being a permanent gap rather than an actionable failure
+      unresolved  failed again. Recorded so the next normal run retries it
+                  instead of the failure living only in the repair log. Already
+                  counted as dropped by the original walk, so no count change.
+
+    `stored` is taken from the live point count, as everywhere else.
+    """
+    data = load_checkpoint_raw()
+    ledger = {k: set(v) for k, v in data["dropped_ids"].items()}
+    on_ledger = ledger["error"] | ledger["parse"]
+
+    repaired    = set(repaired_ids)
+    skipped     = set(skipped_ids)
+    nonexistent = set(nonexistent_ids)
+
+    n_repaired = len(repaired & on_ledger)
+    n_skipped  = len(skipped & on_ledger)
+
+    settled = repaired | skipped | nonexistent
+    remaining = {k: v - settled for k, v in ledger.items()}
+
+    # The repair does not separate parse failures from fetch failures the way
+    # the ingest loop does, so re-entries land in the "error" bucket.
+    readded = set(unresolved_ids) - remaining["error"] - remaining["parse"]
+    remaining["error"] |= readded
+
+    before_dropped, before_skipped = data.get("dropped", 0), data.get("skipped", 0)
+    data["dropped"] = max(0, before_dropped - n_repaired - n_skipped)
+    data["skipped"] = before_skipped + n_skipped
+    data["dropped_ids"] = {k: sorted(v) for k, v in remaining.items()}
+
+    live = live_points_count(qdrant_client)
+    before_stored = data.get("stored", 0)
+    if live is not None:
+        data["stored"] = live
+
+    _atomic_write_json(CHECKPOINT_FILE, data)
+
+    logger.info(
+        f"Checkpoint updated after repair: "
+        f"stored {before_stored}→{data['stored']}  "
+        f"skipped {before_skipped}→{data['skipped']}  "
+        f"dropped {before_dropped}→{data['dropped']}  "
+        f"dropped_ids {len(on_ledger)}→{sum(len(v) for v in remaining.values())} "
+        f"(-{len(on_ledger & settled)} settled, +{len(readded)} still failing)."
+    )
+    return data
+
+
+def save_checkpoint(last_id, stored, skipped, dropped, dropped_ids=None,
+                    qdrant_client=None):
     """
     Persist progress. Read-modify-write so that keys written by another mode
     (e.g. --repair) are preserved rather than silently dropped by a plain
     4-key overwrite.
+
+    `stored` is reconciled against the live point count before writing, so a
+    point added outside the ingest loop can never leave the counter behind —
+    see the Counters note in the module docstring. Returns the value actually
+    written so the caller can adopt it and stop reporting a stale total.
 
     dropped_ids, when given, is a {"error": [...], "parse": [...]} dict that
     REPLACES the stored one (callers own the full current set). Nonexistent IDs
     are deliberately never recorded here — there are ~32k of them and they are
     not actionable; they belong in the repair sidecar.
     """
+    live = live_points_count(qdrant_client)
+    if live is not None and live != stored:
+        logger.info(
+            f"`stored` reconciled against '{collection_name}': "
+            f"{stored} → {live} ({live - stored:+d})."
+        )
+        stored = live
+
     data = load_checkpoint_raw()
     data.update({"last_id": last_id, "stored": stored,
                  "skipped": skipped, "dropped": dropped})
@@ -236,6 +534,7 @@ def save_checkpoint(last_id, stored, skipped, dropped, dropped_ids=None):
             "parse": sorted(set(dropped_ids.get("parse", []))),
         }
     _atomic_write_json(CHECKPOINT_FILE, data)
+    return stored
 
 
 # ── Max ID detection ──────────────────────────────────────────────────────────
@@ -303,8 +602,7 @@ def ensure_collection(qdrant_client, vector_size):
     else:
         # .env carries MODEL_PATH and COLLECTION_NAME as a commented-out pair, so
         # flipping one and forgetting the other is easy — and would write vectors
-        # from the wrong model into a live collection. Same probe as
-        # DebugScripts/sync_missing_entries.py.
+        # from the wrong model into a live collection.
         actual = qdrant_client.get_collection(collection_name).config.params.vectors.size
         if actual != vector_size:
             raise RuntimeError(
@@ -406,10 +704,13 @@ def run_repair(username, password, id_from, id_to, recheck=False,
     """
     Re-probe IDs absent from the collection and ingest only the genuine drops.
 
-    Never touches the checkpoint's last_id. Skipped entries are re-filtered
-    through should_skip() on fresh data, so a checklist can never be resurrected
-    by the repair — the cache can only ever REMOVE an ID from the candidate
-    list, never cause one to be ingested.
+    Never touches the checkpoint's last_id — walking new ground stays the
+    ingest loop's job. It does settle the checkpoint's counters and retry list
+    for the IDs it resolved; see apply_repair_to_checkpoint().
+
+    Skipped entries are re-filtered through should_skip() on fresh data, so a
+    checklist can never be resurrected by the repair — the cache can only ever
+    REMOVE an ID from the candidate list, never cause one to be ingested.
     """
     processor = TextProcessor(model_name=model_path)
     qdrant_client = _get_qdrant_client()
@@ -452,10 +753,16 @@ def run_repair(username, password, id_from, id_to, recheck=False,
     tally = {"repaired": 0, "skipped": 0, "nonexistent": 0, "unresolved": 0}
     pending = []
 
+    # This pass's outcome per ID, for folding back into the checkpoint at the
+    # end. Kept separate from `state`, which accumulates across every pass ever
+    # run — the checkpoint must only be adjusted for what changed just now.
+    outcome = {"repaired": [], "skipped": [], "nonexistent": [], "unresolved": []}
+
     def flush():
         if pending and not dry_run:
             qdrant_client.upsert(collection_name=collection_name, points=pending)
             state["repaired"].extend(p.id for p in pending)
+            outcome["repaired"].extend(p.id for p in pending)
             tally["repaired"] += len(pending)
             logger.info(f"Repaired {len(pending)} entry/entries (total {tally['repaired']}).")
             pending.clear()
@@ -486,16 +793,19 @@ def run_repair(username, password, id_from, id_to, recheck=False,
             if entry is None:
                 if eid in errors:
                     tally["unresolved"] += 1
+                    outcome["unresolved"].append(eid)
                     logger.warning(f"ID {eid}: unresolved — {errors[eid]}")
                 else:
                     tally["nonexistent"] += 1
                     state["nonexistent"].append(eid)
+                    outcome["nonexistent"].append(eid)
                 continue
 
             if should_skip(entry):
                 # The guard. Re-evaluated on freshly fetched data every time.
                 tally["skipped"] += 1
                 state["skipped"].append(eid)
+                outcome["skipped"].append(eid)
                 logger.debug(f"ID {eid}: skipped — subject={entry.get('subject','')!r}")
                 continue
 
@@ -512,6 +822,7 @@ def run_repair(username, password, id_from, id_to, recheck=False,
                 pending.append(entry_to_point(entry, processor))
             except Exception as e:
                 tally["unresolved"] += 1
+                outcome["unresolved"].append(eid)
                 logger.warning(f"ID {eid}: unresolved — processing — {type(e).__name__}: {e}")
                 continue
 
@@ -527,6 +838,15 @@ def run_repair(username, password, id_from, id_to, recheck=False,
     flush()
     if not dry_run:
         save_repair_state(state, state_path)
+        # The repair writes real points and settles real IDs, but none of the
+        # counters it moves live in its own sidecar — `stored`, `dropped` and
+        # the retry list are the checkpoint's. Without this the checkpoint
+        # reads low by the number recovered and keeps queueing IDs the repair
+        # has already dealt with.
+        apply_repair_to_checkpoint(
+            outcome["repaired"], outcome["skipped"], outcome["nonexistent"],
+            outcome["unresolved"], qdrant_client=qdrant_client,
+        )
 
     logger.info(
         f"Repair done ({'DRY RUN — nothing written' if dry_run else 'live'}).  "
@@ -651,8 +971,8 @@ def run_updateSBND(username, password, after='7days', limit=100, max_id=None,
         skipped += recovered["skipped"]
         dropped -= (recovered["stored"] + recovered["skipped"])
         dropped_ids = still_failing
-        save_checkpoint(checkpoint["last_id"], stored, skipped, dropped,
-                        dropped_ids=dropped_ids)
+        stored = save_checkpoint(checkpoint["last_id"], stored, skipped, dropped,
+                                 dropped_ids=dropped_ids, qdrant_client=qdrant_client)
         logger.info(
             f"Retry pass: recovered={recovered['stored']} "
             f"now-skipped={recovered['skipped']} "
@@ -771,7 +1091,8 @@ def run_updateSBND(username, password, after='7days', limit=100, max_id=None,
                     f"total stored={stored}  skipped={skipped}  dropped={dropped}  last_id={chunk_ids[-1]}"
                 )
                 pending_points = []
-            save_checkpoint(chunk_ids[-1], stored, skipped, dropped, dropped_ids=dropped_ids)
+            stored = save_checkpoint(chunk_ids[-1], stored, skipped, dropped,
+                                     dropped_ids=dropped_ids, qdrant_client=qdrant_client)
         logger.info(
             f"Chunk done: IDs {chunk_ids[0]}–{chunk_ids[-1]}  |  "
             f"stored={stored}  skipped={skipped}  dropped={dropped} "
@@ -782,7 +1103,8 @@ def run_updateSBND(username, password, after='7days', limit=100, max_id=None,
     if pending_points and not dry_run:
         qdrant_client.upsert(collection_name=collection_name, points=pending_points)
         stored += len(pending_points)
-        save_checkpoint(max_id, stored, skipped, dropped, dropped_ids=dropped_ids)
+        stored = save_checkpoint(max_id, stored, skipped, dropped,
+                                 dropped_ids=dropped_ids, qdrant_client=qdrant_client)
 
     n_pending_retry = sum(len(v) for v in dropped_ids.values())
     logger.info(
@@ -826,6 +1148,18 @@ def parse_arguments():
                         help='Delete all points from the Qdrant collection before updating.')
     parser.add_argument('--log_file', type=str, default=None,
                         help='Write logs here (default: logs/update_<COLLECTION>_<timestamp>.log).')
+    parser.add_argument('--reconcile', action='store_true',
+                        help="Re-sync the checkpoint's `stored` counter to the collection's real "
+                             'point count and exit. Touches nothing else — no fetching, no writes '
+                             'to Qdrant, and last_id/dropped_ids are left alone.')
+    parser.add_argument('--recount', action='store_true',
+                        help='Recompute stored/skipped/dropped by counting per-ID ground truth '
+                             '(collection + repair sidecar + dropped_ids) and exit. Range defaults '
+                             'to the whole collection; narrow it with --repair_from/--repair_to. '
+                             'Always re-syncs `stored` (so it covers --reconcile); writes '
+                             'skipped/dropped only when every ID in range is accounted for, '
+                             'exiting non-zero when it is not. Contacts no server other than '
+                             'Qdrant; combine with --dry_run to report only.')
 
     repair = parser.add_argument_group('repair mode')
     repair.add_argument('--repair', action='store_true',
@@ -850,6 +1184,35 @@ if __name__ == "__main__":
         logging.getLogger().setLevel(logging.DEBUG)
 
     add_file_logging(args.log_file)
+
+    if args.reconcile and args.recount:
+        raise SystemExit("--recount already re-syncs `stored`; drop --reconcile.")
+
+    if args.reconcile:
+        if args.repair or args.reset or args.clear:
+            raise SystemExit("--reconcile cannot be combined with --repair, --reset or --clear.")
+        if reconcile_stored() is None:
+            raise SystemExit("Could not reach Qdrant — checkpoint left unchanged.")
+        raise SystemExit(0)
+
+    if args.recount:
+        if args.repair or args.reset or args.clear:
+            raise SystemExit("--recount cannot be combined with --repair, --reset or --clear.")
+
+        report = recount(id_from=args.repair_from, id_to=args.repair_to)
+        log_recount(report)
+
+        if args.dry_run:
+            logger.info(
+                "[DRY RUN] nothing written. Re-run without --dry_run to apply "
+                + ("all three counters." if report["complete"] else "`stored`.")
+            )
+            raise SystemExit(0)
+
+        apply_recount(report)
+        # Non-zero when the range could not be fully counted: `stored` is now
+        # correct, but the caller asked for a recount and only got part of one.
+        raise SystemExit(0 if report["complete"] else 1)
 
     if args.repair:
         if args.reset or args.clear:
