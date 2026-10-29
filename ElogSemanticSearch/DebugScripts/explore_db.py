@@ -35,7 +35,7 @@ from dotenv import load_dotenv, find_dotenv
 
 load_dotenv(find_dotenv())
 
-from DataFetch.text_to_vectorSBND import TextProcessor
+from DataFetch.text_to_vector import TextProcessor
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import Filter, FieldCondition, MatchValue
 

@@ -2,7 +2,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-run_updateSBND.py
+run_update.py
 -----------------
 Sync SBND ECL entries into Qdrant. Serves two modes via the same
 checkpointed ID-walk engine:
@@ -51,15 +51,15 @@ Counters:
   have been reset or interrupted.
 
 Usage:
-  python run_updateSBND.py                  # steady-state update, auto-detect max ID
-  python run_updateSBND.py --max_id 12000   # override max ID
-  python run_updateSBND.py --dry_run        # fetch + filter but skip Qdrant writes and checkpoint advance
-  python run_updateSBND.py --reset          # delete checkpoint and start over (initial backfill)
-  python run_updateSBND.py --repair --dry_run          # preview what repair would recover
-  python run_updateSBND.py --repair --repair_from 40438 --repair_to 40836
-  python run_updateSBND.py --reconcile      # only re-sync `stored` to the live point count
-  python run_updateSBND.py --recount --dry_run   # report true stored/skipped/dropped
-  python run_updateSBND.py --recount        # ...and write them to the checkpoint
+  python run_update.py                  # steady-state update, auto-detect max ID
+  python run_update.py --max_id 12000   # override max ID
+  python run_update.py --dry_run        # fetch + filter but skip Qdrant writes and checkpoint advance
+  python run_update.py --reset          # delete checkpoint and start over (initial backfill)
+  python run_update.py --repair --dry_run          # preview what repair would recover
+  python run_update.py --repair --repair_from 40438 --repair_to 40836
+  python run_update.py --reconcile      # only re-sync `stored` to the live point count
+  python run_update.py --recount --dry_run   # report true stored/skipped/dropped
+  python run_update.py --recount        # ...and write them to the checkpoint
 
 @author: haydenh
 @modified by jiaoyang for SBND ECL
@@ -87,8 +87,8 @@ with open(_PWD_PATH if os.path.exists(_PWD_PATH) else 'pwd.txt', 'r') as f:
 USERNAME = os.environ.get('ECL_USERNAME', 'sbndprm')
 PASSWORD = os.environ.get('ECL_PASSWORD', ecl_pwd)
 
-from DataFetch.ElogFetcherQdrantSBND import ElogFetcher, EntryFetchError, EntryParseError
-from DataFetch.text_to_vectorSBND import TextProcessor
+from DataFetch.ElogFetcherQdrant import ElogFetcher, EntryFetchError, EntryParseError
+from DataFetch.text_to_vector import TextProcessor
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import Distance, PointStruct, VectorParams
 
@@ -106,7 +106,7 @@ def add_file_logging(log_file=None):
     Without this, the per-ID reason a fetch failed is printed once and lost,
     which is precisely what made the earlier dropped entries impossible to
     diagnose after the fact. Attaches to the ROOT logger so the fetcher's
-    messages (DataFetch.ElogFetcherQdrantSBND) are captured too.
+    messages (DataFetch.ElogFetcherQdrant) are captured too.
     """
     if log_file is None:
         log_dir = os.path.join(os.path.dirname(__file__), 'logs')
@@ -444,7 +444,7 @@ def apply_repair_to_checkpoint(repaired_ids, skipped_ids, nonexistent_ids,
     one into `skipped`, and nothing on disk distinguishes them — so they are
     deliberately left alone rather than guessed at.
 
-    Per class, mirroring what the retry pass in run_updateSBND() does:
+    Per class, mirroring what the retry pass in run_update() does:
 
       repaired    now has a point.  dropped -= 1 (if it was on the ledger)
       skipped     produces no point, but belongs to `skipped`, not `dropped`:
@@ -553,8 +553,8 @@ def detect_max_id(fetcher, after='7days', limit=100):
 
 # ── Entry processing ──────────────────────────────────────────────────────────
 
-def entry_to_point(entry, processor):
-    """Embed a parsed entry dict and return a Qdrant PointStruct."""
+def entry_to_text(entry, processor):
+    """Build the exact text that gets embedded for a parsed entry dict."""
     main_text = entry.get('text', '')
     comments_text = " ".join(c.get('text', '') for c in entry.get('comments', []))
     combined = f"{main_text} {comments_text}".strip()
@@ -568,7 +568,12 @@ def entry_to_point(entry, processor):
 
     if cats:
         augmented_text = processor.augment_with_cats(augmented_text, cats)
-    augmented_text = processor.augment_with_logs(augmented_text, logs)
+    return processor.augment_with_logs(augmented_text, logs)
+
+
+def entry_to_point(entry, processor):
+    """Embed a parsed entry dict and return a Qdrant PointStruct."""
+    augmented_text = entry_to_text(entry, processor)
 
     vector        = processor.generate_embeddings(augmented_text).tolist()
     creation_date = processor.date_to_rfc3339(entry.get('creation_date', ''))
@@ -581,6 +586,9 @@ def entry_to_point(entry, processor):
             'top_category':  entry.get('top_category', ''),
             'subcategory':   entry.get('subcategory', ''),
             'creation_date': creation_date,
+            # The embedded text itself, for the API's reranker (it reads query
+            # + entry text together). Not returned to the OpenWebUI LLM.
+            'text':          augmented_text,
         }
     )
 
@@ -923,7 +931,7 @@ def _retry_dropped(retry_ids, fetcher, processor, qdrant_client, batch_size=100)
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
-def run_updateSBND(username, password, after='7days', limit=100, max_id=None,
+def run_update(username, password, after='7days', limit=100, max_id=None,
                    max_workers=8, chunk_size=100, batch_size=500, dry_run=False):
     logger.info("Initializing text processor and ECL fetcher...")
     processor = TextProcessor(model_name=model_path)
@@ -1260,7 +1268,7 @@ if __name__ == "__main__":
         logger.warning(f"--clear flag set: deleting all points from collection '{collection_name}'.")
         clear_collection()
 
-    run_updateSBND(
+    run_update(
         username=args.username,
         password=args.password,
         after=args.after,

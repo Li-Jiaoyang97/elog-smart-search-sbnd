@@ -2,7 +2,7 @@ services:
   qdrant:
     image: qdrant/qdrant:latest
     ports:
-      # Loopback only: scripts on this Mac (run_updateSBND.py, DebugScripts/...)
+      # Loopback only: scripts on this Mac (run_update.py, DebugScripts/...)
       # still reach it as localhost:6333, but other machines on the network
       # can't. The app container doesn't use these - it talks to Qdrant over
       # Docker's internal network (QDRANT_HOST: qdrant).

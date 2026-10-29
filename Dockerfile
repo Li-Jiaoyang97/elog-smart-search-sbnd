@@ -35,4 +35,4 @@ COPY ElogSemanticSearch /app/ElogSemanticSearch
 
 EXPOSE 8000
 
-CMD ["python", "-m", "uvicorn", "ElogSemanticSearch.RESTAPI_Qdrant_HTML_SBND:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "uvicorn", "ElogSemanticSearch.RESTAPI_Qdrant_HTML:app", "--host", "0.0.0.0", "--port", "8000"]

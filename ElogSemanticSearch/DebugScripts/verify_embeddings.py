@@ -21,16 +21,16 @@ import numpy as np
 
 ELOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path.insert(0, ELOG_DIR)
-# run_updateSBND reads pwd.txt relative to the cwd at import time.
+# run_update reads pwd.txt relative to the cwd at import time.
 os.chdir(ELOG_DIR)
 
 from dotenv import load_dotenv, find_dotenv
 
 load_dotenv(find_dotenv())
 
-from run_updateSBND import entry_to_point, USERNAME, PASSWORD
-from DataFetch.ElogFetcherQdrantSBND import ElogFetcher
-from DataFetch.text_to_vectorSBND import TextProcessor
+from run_update import entry_to_point, USERNAME, PASSWORD
+from DataFetch.ElogFetcherQdrant import ElogFetcher
+from DataFetch.text_to_vector import TextProcessor
 from qdrant_client import QdrantClient
 
 COLLECTIONS = {

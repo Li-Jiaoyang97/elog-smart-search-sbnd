@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
 test_elog_fetcher.py
-Quick sanity-check for ElogFetcherQdrantSBND.ElogFetcher
+Quick sanity-check for ElogFetcherQdrant.ElogFetcher
 """
 
 import os
-from DataFetch.ElogFetcherQdrantSBND import ElogFetcher
+from DataFetch.ElogFetcherQdrant import ElogFetcher
 
 with open('../pwd.txt', 'r') as f:
     ecl_pwd = f.read().strip()  
@@ -14,7 +14,7 @@ with open('../pwd.txt', 'r') as f:
 USERNAME = os.environ.get('ECL_USERNAME', 'sbndprm')
 PASSWORD = os.environ.get('ECL_PASSWORD', ecl_pwd)
 
-def test_ElogFetcherSBND():
+def test_ElogFetcher():
 
     # Initialize the fetcher
     fetcher = ElogFetcher()
@@ -102,4 +102,4 @@ def test_ElogFetcherSBND():
 
 
 if __name__ == '__main__':
-    test_ElogFetcherSBND()
+    test_ElogFetcher()

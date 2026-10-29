@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-ElogFetcherQdrantSBND.py
+ElogFetcherQdrant.py
 ---------------------
 Drop-in replacement for the original ElogFetcherQdrant.py.
 Uses ecl_api to fetch entries from the SBND ECL elog system
