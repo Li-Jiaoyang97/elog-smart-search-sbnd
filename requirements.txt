@@ -1,3 +1,12 @@
+# CPU-only PyTorch. The default PyPI `torch` wheel hard-depends on ~12
+# nvidia-* packages (cuDNN, cuBLAS, NCCL, ...) plus triton, which pip installs
+# whether or not a GPU exists - 3.4 GB of dead weight here, since inference is
+# explicitly CPU-only (CrossEncoder(device='cpu') in QdrantSearchSBND.py).
+# This index serves the same torch versions built without the CUDA libs;
+# everything non-torch still resolves from PyPI via the extra index.
+--index-url https://download.pytorch.org/whl/cpu
+--extra-index-url https://pypi.org/simple
+
 # FastAPI installs
 fastapi==0.136.3
 uvicorn[standard]==0.41.0

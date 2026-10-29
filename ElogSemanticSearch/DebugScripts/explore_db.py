@@ -16,19 +16,24 @@ Options:
   --top N              Number of results to show (default: 10)
 
 Examples:
-  python explore_db.py --query "beam off target"
-  python explore_db.py --query "CRT noise issue" --category CRT --top 5
-  python explore_db.py --similar 8423
-  python explore_db.py --list-categories
-  python explore_db.py --id-range --top 10
+  python DebugScripts/explore_db.py --query "beam off target"
+  python DebugScripts/explore_db.py --query "CRT noise issue" --category CRT --top 5
+  python DebugScripts/explore_db.py --similar 8423
+  python DebugScripts/explore_db.py --list-categories
+  python DebugScripts/explore_db.py --id-range --top 10
 """
 
 import os
 import argparse
 import logging
-from dotenv import load_dotenv
+import sys
 
-load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
+ELOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
+sys.path.insert(0, ELOG_DIR)
+
+from dotenv import load_dotenv, find_dotenv
+
+load_dotenv(find_dotenv())
 
 from DataFetch.text_to_vectorSBND import TextProcessor
 from qdrant_client import QdrantClient

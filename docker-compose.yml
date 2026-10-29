@@ -2,8 +2,12 @@ services:
   qdrant:
     image: qdrant/qdrant:latest
     ports:
-      - "6333:6333"
-      - "6334:6334"
+      # Loopback only: scripts on this Mac (run_updateSBND.py, DebugScripts/...)
+      # still reach it as localhost:6333, but other machines on the network
+      # can't. The app container doesn't use these - it talks to Qdrant over
+      # Docker's internal network (QDRANT_HOST: qdrant).
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
     volumes:
       # Bind-mounted so the index survives container recreation/removal -
       # migrated from the old volume-less standalone `qdrant` container via
@@ -19,7 +23,10 @@ services:
     depends_on:
       - qdrant
     ports:
-      - "8000:8000"
+      # Loopback only while OpenWebUI runs on this same Mac. If OpenWebUI ends
+      # up on a different host, this has to be reachable again - then protect
+      # it with an API key + firewall instead.
+      - "127.0.0.1:8000:8000"
     environment:
       QDRANT_HOST: qdrant
       MODEL_PATH: /app/ElogSemanticSearch/models/mxbai-embed-large-v1
@@ -28,7 +35,10 @@ services:
       # the "model" field of /api/search.
       MPNET_MODEL_PATH: /app/ElogSemanticSearch/models/all-mpnet-base-v2
       MPNET_COLLECTION_NAME: Elog_collection_768_METADATA
-      AD_COLLECTION_NAME: Elog_collection_768_AD
+      # Cross-encoder reranker for /api/search (top 50 dense hits re-sorted,
+      # best 10 returned). Comment out to switch reranking off.
+      RERANK_MODEL_PATH: /app/ElogSemanticSearch/models/bge-reranker-base
+      RERANK_TOP: "50"
     volumes:
       # Bind-mounted (not COPYed into the image) so swapping embedding
       # models doesn't require a rebuild.
