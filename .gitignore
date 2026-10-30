@@ -17,3 +17,8 @@ ElogSemanticSearch/elog_map_*.html
 __pycache__/
 *.pyc
 .DS_Store
+# Local text cache for retrieval experiments (DebugScripts/build_text_cache.py)
+ElogSemanticSearch/*.jsonl
+ElogSemanticSearch/DebugScripts/*.jsonl
+.webui_secret_key
+ElogSemanticSearch/.webui_secret_key

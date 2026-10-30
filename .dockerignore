@@ -16,3 +16,6 @@ ElogSemanticSearch/models/*
 ElogSemanticSearch/elog_map.html
 ElogSemanticSearch/pwd.txt
 ElogSemanticSearch/DebugScripts/
+
+# Local text cache for retrieval experiments
+ElogSemanticSearch/*.jsonl
