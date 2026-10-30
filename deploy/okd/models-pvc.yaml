@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: elog-models
+spec:
+  accessModes:
+    # RWX: the serving app mounts this read-only, and the download Job
+    # writes it. CephFS supports multi-attach.
+    - ReadWriteMany
+  resources:
+    requests:
+      # mxbai 640M + bge-reranker 1.1G = ~1.7G.
+      storage: 5Gi
+  storageClassName: ceph-csi-cephfs-sc-sa-ifdata

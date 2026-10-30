@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qdrant
+spec:
+  replicas: 1
+  # Recreate, not RollingUpdate: two Qdrant pods must never have the storage
+  # volume open at the same time.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: qdrant
+  template:
+    metadata:
+      labels:
+        app: qdrant
+    spec:
+      containers:
+        - name: qdrant
+          # Pinned to the version the local index was built and tested with
+          # (storage format: collections 0.4.2, segments 0.6.0). Qdrant
+          # upgrades the on-disk format in place and won't downgrade, so let
+          # a restart pull a newer release and the data can't be rolled back.
+          image: qdrant/qdrant:v1.17.1
+          ports:
+            - name: http
+              containerPort: 6333
+          volumeMounts:
+            - name: storage
+              mountPath: /qdrant/storage
+          resources:
+            requests:
+              cpu: 100m
+              memory: 1Gi
+            limits:
+              # OPA admission webhook on okdprod1 requires all four of
+              # cpu/memory request and limit on every container.
+              cpu: "2"
+              memory: 2Gi
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            initialDelaySeconds: 15
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: qdrant-storage

@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: elog-search-config
+data:
+  # Shared by the serving API (RESTAPI_Qdrant_HTML.py) and, once it is
+  # deployed, the index updater (run_update.py). These two must agree: a
+  # 1024-dim model against a 768-dim collection fails at query time, which
+  # is what run_update.py's dimension check guards against.
+  COLLECTION_NAME: Elog_collection_1024_METADATA
+  MODEL_PATH: /app/ElogSemanticSearch/models/mxbai-embed-large-v1
+  RERANK_MODEL_PATH: /app/ElogSemanticSearch/models/bge-reranker-base
+  RERANK_TOP: "50"

@@ -1,0 +1,47 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: download-models
+spec:
+  # One-shot: if the download fails, fix it and recreate the Job rather than
+  # letting it retry into a half-written model directory.
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: download
+          image: python:3.11-slim
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              pip install --no-cache-dir "huggingface_hub==0.25.2"
+              python - <<'PY'
+              from huggingface_hub import snapshot_download
+              for repo, dest in [
+                  ("mixedbread-ai/mxbai-embed-large-v1", "/models/mxbai-embed-large-v1"),
+                  ("BAAI/bge-reranker-base", "/models/bge-reranker-base"),
+              ]:
+                  print(f"downloading {repo} -> {dest}", flush=True)
+                  snapshot_download(
+                      repo_id=repo,
+                      local_dir=dest,
+                      allow_patterns=["*.json", "*.txt", "*.model", "*.safetensors", "1_Pooling/*"],
+                  )
+              print("done", flush=True)
+              PY
+              ls -la /models/*/
+          volumeMounts:
+            - name: models
+              mountPath: /models
+          resources:
+            requests:
+              cpu: 200m
+              memory: 1Gi
+            limits:
+              memory: 2Gi
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: elog-models
