@@ -23,7 +23,6 @@ class TextProcessor:
         #  # Enable GPU for spaCy
         # spacy.require_gpu()
         # self.nlp = spacy.load("en_core_web_trf")
-        # self.exclusions = self.load_exclusions('exclusions.txt')
 
 
     def augment_with_logs(self, text, logs):
