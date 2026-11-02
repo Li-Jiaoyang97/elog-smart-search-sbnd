@@ -4,18 +4,25 @@ metadata:
   name: elog-semantic-search
 spec:
   source:
-    # Binary: the source is uploaded from the laptop with
-    #   oc start-build elog-semantic-search --from-dir=. --follow
-    # rather than cloned, so the private GitHub repo needs no credentials
-    # on the cluster. .dockerignore decides what is sent.
-    type: Binary
-    binary: {}
+    # The cluster clones the repo itself, so an image is always traceable to
+    # a commit rather than to whatever happened to be in a laptop's working
+    # tree. Needs the repo to be public; otherwise add a token in
+    # sourceSecret.
+    type: Git
+    git:
+      uri: https://github.com/Li-Jiaoyang97/elog-smart-search-sbnd.git
+      ref: feature/okd-deploy
   strategy:
     type: Docker
     dockerStrategy:
       dockerfilePath: Dockerfile
   output:
     to:
+      # Builds land on :latest, and deploy/okd/build.sh immediately tags the
+      # result with the commit SHA it was built from. OKD substitutes nothing
+      # in this field and start-build has no --to, so the commit tag has to be
+      # applied after the build rather than named here. Deployments reference
+      # a SHA tag, never :latest, so a restart can't quietly change versions.
       kind: ImageStreamTag
       name: elog-semantic-search:latest
   resources:
