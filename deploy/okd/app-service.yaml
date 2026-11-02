@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: elog-semantic-search
+spec:
+  # A normal ClusterIP service, unlike qdrant's headless one: nothing needs a
+  # stable per-pod name here, and a cluster IP is what lets the Route in front
+  # of it load-balance if the Deployment ever runs more than one replica.
+  selector:
+    app: elog-semantic-search
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

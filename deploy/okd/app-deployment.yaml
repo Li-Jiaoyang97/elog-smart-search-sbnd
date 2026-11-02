@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: elog-semantic-search
+spec:
+  # Deployment, not StatefulSet: the API holds nothing on disk. It reads the
+  # models volume read-only and keeps the index in Qdrant, so two of these
+  # running at once is harmless - the opposite of the Qdrant case.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: elog-semantic-search
+  template:
+    metadata:
+      labels:
+        app: elog-semantic-search
+    spec:
+      containers:
+        - name: api
+          # No tag yet: deploy/okd/build.sh prints the SHA to put here after
+          # the first build. Deliberately not ":latest" - a placeholder that
+          # fails to pull beats a tag that silently changes under a restart.
+          image: elog-semantic-search:<REPLACE_WITH_SHA>
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            # COLLECTION_NAME, MODEL_PATH, RERANK_MODEL_PATH, RERANK_TOP.
+            - configMapRef:
+                name: elog-search-config
+          env:
+            # The headless Service in qdrant-service.yaml. Not in the ConfigMap
+            # because the index updater CronJob will need the same value and
+            # this is the one piece of config that is purely about topology.
+            - name: QDRANT_HOST
+              value: qdrant
+          volumeMounts:
+            - name: models
+              mountPath: /app/ElogSemanticSearch/models
+              # The download Job writes this volume; the API only reads it.
+              readOnly: true
+          resources:
+            requests:
+              cpu: 500m
+              # Measured locally: ~2.4Gi resident with mxbai + bge-reranker
+              # both loaded.
+              memory: 3Gi
+            limits:
+              # OPA admission on okdprod1 requires all four values.
+              cpu: "2"
+              memory: 4Gi
+          startupProbe:
+            # Both models are read off CephFS at import time, before uvicorn
+            # binds the port, so the first /health reply means the API is
+            # genuinely ready. 30 x 10s allows five minutes for a cold read.
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: elog-models

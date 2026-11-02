@@ -244,6 +244,20 @@ def lookup_entries(ids):
     return found
 
 
+@app.get("/health", summary="Liveness and readiness probe")
+def health():
+    """What the Kubernetes probes call. It answers only once the module has
+    finished importing, and initialize_searchers() runs during that import, so
+    a reply means the models are loaded. Deliberately does not touch Qdrant:
+    restarting this pod cannot fix a down database, and failing readiness on it
+    would turn a readable error into a bare 503."""
+    return {
+        "status": "ok",
+        "models": sorted(searchers),
+        "reranker": reranker is not None,
+    }
+
+
 @app.post(
     "/api/search",
     summary="Search the SBND logbook",
