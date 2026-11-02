@@ -1,13 +1,17 @@
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: qdrant
 spec:
+  # StatefulSet rather than Deployment because Qdrant owns the files on its
+  # volume: it must be the only process writing them. On a node partition a
+  # Deployment eventually assumes the pod is gone and starts a replacement,
+  # which can leave the original running on the unreachable node with the
+  # same volume mounted. A StatefulSet refuses to start the replacement until
+  # the old pod is confirmed deleted - Qdrant stays down instead of risking
+  # two writers.
+  serviceName: qdrant
   replicas: 1
-  # Recreate, not RollingUpdate: two Qdrant pods must never have the storage
-  # volume open at the same time.
-  strategy:
-    type: Recreate
   selector:
     matchLabels:
       app: qdrant
@@ -34,8 +38,6 @@ spec:
               cpu: 100m
               memory: 1Gi
             limits:
-              # OPA admission webhook on okdprod1 requires all four of
-              # cpu/memory request and limit on every container.
               cpu: "2"
               memory: 2Gi
           readinessProbe:
@@ -48,7 +50,14 @@ spec:
               path: /livez
               port: http
             initialDelaySeconds: 15
-      volumes:
-        - name: storage
-          persistentVolumeClaim:
-            claimName: qdrant-storage
+  volumeClaimTemplates:
+    - metadata:
+        name: storage
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            # Single collection: Elog_collection_1024_METADATA is ~593M today.
+            storage: 10Gi
+        storageClassName: ceph-csi-cephfs-sc-sa-ifdata

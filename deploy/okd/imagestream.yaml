@@ -1,0 +1,9 @@
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: elog-semantic-search
+spec:
+  # Builds push here; the app Deployment pulls from here. Empty until the
+  # first build runs.
+  lookupPolicy:
+    local: true

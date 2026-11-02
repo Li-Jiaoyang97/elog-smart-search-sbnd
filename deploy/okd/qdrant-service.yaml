@@ -3,6 +3,10 @@ kind: Service
 metadata:
   name: qdrant
 spec:
+  # Headless: the StatefulSet's serviceName points here, which is what gives
+  # the pod its stable DNS name (qdrant-0.qdrant). Clients still reach the
+  # index at qdrant:6333.
+  clusterIP: None
   selector:
     app: qdrant
   ports:

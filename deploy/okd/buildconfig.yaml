@@ -1,0 +1,29 @@
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: elog-semantic-search
+spec:
+  source:
+    # Binary: the source is uploaded from the laptop with
+    #   oc start-build elog-semantic-search --from-dir=. --follow
+    # rather than cloned, so the private GitHub repo needs no credentials
+    # on the cluster. .dockerignore decides what is sent.
+    type: Binary
+    binary: {}
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: elog-semantic-search:latest
+  resources:
+    requests:
+      cpu: "1"
+      memory: 2Gi
+    limits:
+      # pip resolving torch and friends is the memory-hungry part; the OPA
+      # webhook requires all four values regardless.
+      cpu: "2"
+      memory: 4Gi
