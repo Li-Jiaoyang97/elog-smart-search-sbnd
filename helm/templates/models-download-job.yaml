@@ -27,11 +27,24 @@ spec:
       containers:
         - name: download
           image: {{ .Values.models.download.image }}
+          env:
+            # OpenShift assigns an arbitrary UID whose home directory is "/",
+            # which no container user may write. Without these, pip falls back
+            # to a --user install into /.local and huggingface_hub writes its
+            # metadata to /.cache; both fail with EACCES. /tmp is writable for
+            # any UID, so point HOME, the HF cache and the install prefix there.
+            - name: HOME
+              value: /tmp
+            - name: HF_HOME
+              value: /tmp/huggingface
+            - name: PYTHONPATH
+              value: /tmp/pylibs
           command: ["/bin/sh", "-c"]
           args:
             - |
               set -eu
-              pip install --no-cache-dir "huggingface_hub=={{ .Values.models.download.huggingfaceHubVersion }}"
+              pip install --no-cache-dir --target=/tmp/pylibs \
+                  "huggingface_hub=={{ .Values.models.download.huggingfaceHubVersion }}"
               python - <<'PY'
               from huggingface_hub import snapshot_download
               for repo, dest in [
