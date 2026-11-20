@@ -13,9 +13,9 @@ spec:
       ref: {{ .Values.build.git.ref }}
     {{- with .Values.build.git.sourceSecret }}
     sourceSecret:
-      # Created by hand, never committed - see helm/README.md. Set
-      # build.git.sourceSecret to "" if the repo is made public; the clone
-      # then needs no credentials.
+      # Rendered only when build.git.sourceSecret is set, which it is not by
+      # default: the repo is public. The Secret is created by hand and never
+      # committed - see helm/README.md.
       name: {{ . }}
     {{- end }}
   strategy:

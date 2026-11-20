@@ -39,9 +39,8 @@ stuck in `CreateContainerConfigError`.
 
 ## Install
 
-Prerequisites: `helm` 3.8+ or 4.x, `oc` logged in, and the `github-token`
-Secret in the namespace (already present; `deploy/okd/README.md` has the
-command if it ever needs replacing).
+Prerequisites: `helm` 3.8+ or 4.x and `oc` logged in. The repo is public, so
+the in-cluster build clones it with no credential.
 
 ```bash
 oc login --web https://api.okdprod1.fnal.gov:6443

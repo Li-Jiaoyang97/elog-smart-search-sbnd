@@ -5,9 +5,8 @@ Manifests for running the SBND elog semantic search on okdprod1, namespace
 `docker-compose.yml` runs locally: the same two containers, the same single
 collection, backed by persistent volumes instead of bind mounts.
 
-Everything here is a file you can read and diff, with one exception. The
-GitHub token is created by hand and lives only in the cluster, because the
-one thing that must never be in this repo is the token itself.
+Everything here is a file you can read and diff. The repo is public, so the
+in-cluster build clones it with no credential.
 
 ## What is here
 
@@ -36,32 +35,6 @@ oc project ai-for-neutrino-detector-ops
 ```
 
 Tokens expire. If a command starts failing with `Unauthorized`, log in again.
-
-## One-time: the GitHub token
-
-The BuildConfig clones this repo, which is private, so the build needs a
-credential. Make a fine-grained personal access token on GitHub with access to
-this repository only and `Contents: Read-only`, then:
-
-```bash
-pbpaste > ~/.gh-build-token          # after copying the token from GitHub
-
-oc create secret generic github-token \
-  --type=kubernetes.io/basic-auth \
-  --from-literal=username=Li-Jiaoyang97 \
-  --from-file=password=$HOME/.gh-build-token
-
-rm ~/.gh-build-token
-```
-
-Writing it to a file first keeps the token out of your shell history.
-
-When the token expires the build fails with a git authentication error. Make a
-new one and run `oc delete secret github-token` followed by the same create
-command.
-
-If this repo is ever made public, delete the `sourceSecret` block from
-`buildconfig.yaml` and the Secret stops being needed.
 
 ## Order to apply things
 
@@ -139,13 +112,11 @@ terminal closes or the login expires.
 ## Still to do
 
 - **Index updates on a schedule.** A CronJob running `run_update.py`. It needs
-  the ECL password, which should not be an `oc create secret` like the GitHub
-  token: that credential belongs to SBND, has no expiry, and will be needed
+  the ECL password, which should not be a hand-made `oc create secret`: that
+  credential belongs to SBND, has no expiry, and will be needed
   indefinitely. This cluster has the External Secrets Operator installed and
   `oc auth can-i create externalsecrets` says yes, so the password can live in
   Vault and be synced into a Secret automatically. What is not known yet is
   the Vault server address, whether a ClusterSecretStore already exists
   (reading them is forbidden at this access level), and who can write the
   value into Vault. Ask the okdprod1 admins.
-- **Making the repo public**, which removes the GitHub token entirely but needs
-  a LICENSE and SBND sign-off first.

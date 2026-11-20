@@ -11,10 +11,6 @@ spec:
     git:
       uri: https://github.com/Li-Jiaoyang97/elog-smart-search-sbnd.git
       ref: feature/okd-deploy
-    sourceSecret:
-      # Created by hand, never committed - see README.md. Drop this block if
-      # the repo is ever made public; the clone then needs no credentials.
-      name: github-token
   strategy:
     type: Docker
     dockerStrategy:

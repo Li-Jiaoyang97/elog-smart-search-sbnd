@@ -100,9 +100,10 @@ build:
     # commit rather than to whatever happened to be in a laptop's working tree.
     uri: https://github.com/Li-Jiaoyang97/elog-smart-search-sbnd.git
     ref: feature/helm-chart
-    # Created by hand, never committed - see helm/README.md. Set to "" if the
-    # repo is public; the clone then needs no credentials.
-    sourceSecret: github-token
+    # Empty because the repo is public, so the clone needs no credentials.
+    # Set to the name of a basic-auth Secret if it is ever made private again;
+    # helm/README.md has the command.
+    sourceSecret: ""
   dockerfilePath: Dockerfile
   resources:
     requests:
