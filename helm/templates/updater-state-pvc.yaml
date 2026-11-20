@@ -1,0 +1,20 @@
+{{- if .Values.updater.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "elog-search.fullname" . }}-updater-state
+  labels:
+    {{- include "elog-search.labels" . | nindent 4 }}
+  annotations:
+    # Survives `helm uninstall` on purpose. This volume holds the ID-walk
+    # checkpoint; deleting it does not lose entries, but it does force the next
+    # run to re-walk tens of thousands of IDs against the ECL.
+    "helm.sh/resource-policy": keep
+spec:
+  accessModes:
+    {{- toYaml .Values.updater.persistence.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.updater.persistence.size }}
+  storageClassName: {{ .Values.updater.persistence.storageClassName }}
+{{- end }}

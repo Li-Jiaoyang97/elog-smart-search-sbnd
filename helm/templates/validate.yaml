@@ -6,3 +6,9 @@
 {{- fail "\n\nqdrant.podSecurityContext still sets fsGroup.\nOpenShift's restricted-v2 SCC will reject the Qdrant pod at admission.\nAdd -f helm/values-okd.yaml to this command.\n" }}
 {{- end }}
 {{- end }}
+
+{{- if and .Values.updater.enabled .Values.eclCredentials.externalSecret.enabled }}
+{{- if not .Values.eclCredentials.externalSecret.vaultPath }}
+{{- fail "\n\neclCredentials.externalSecret is enabled but vaultPath is empty.\nESO would create an empty Secret and the updater would fail at ECL login.\nAsk the okdprod1 admins for the Vault KV path, or set\neclCredentials.externalSecret.enabled=false and create the Secret by hand.\n" }}
+{{- end }}
+{{- end }}

@@ -89,6 +89,68 @@ models:
         memory: 2Gi
 
 # ---------------------------------------------------------------------------
+# ECL credentials, read by the index updater
+# ---------------------------------------------------------------------------
+eclCredentials:
+  # The Secret the CronJob reads. Either synced from Vault by the
+  # ExternalSecret below, or created by hand until the Vault coordinates are
+  # known - helm/README.md has the oc command.
+  secretName: elog-ecl-credentials
+  usernameKey: username
+  passwordKey: password
+
+  externalSecret:
+    # Off until the okdprod1 admins supply storeRef.name and vaultPath. The
+    # chart cannot discover them: listing ClusterSecretStores is forbidden at
+    # this access level, so `oc get clustersecretstore` returns a 403 rather
+    # than a name. Referencing one by name still works.
+    enabled: false
+    refreshInterval: 1h
+    storeRef:
+      name: ""
+      kind: ClusterSecretStore
+    # Path of the KV secret in Vault, then the two properties inside it.
+    vaultPath: ""
+    usernameProperty: username
+    passwordProperty: password
+
+# ---------------------------------------------------------------------------
+# Index updater CronJob (run_update.py)
+# ---------------------------------------------------------------------------
+updater:
+  # Needs eclCredentials.secretName to exist in the namespace first, or the
+  # job pods sit in CreateContainerConfigError.
+  enabled: true
+  # Nightly. The ECL is quiet at this hour and a run only walks IDs added since
+  # the checkpoint, so it is minutes, not hours.
+  schedule: "0 5 * * *"
+  # Kubernetes 1.27+ only; empty means the cluster's own timezone.
+  timeZone: ""
+  # Extra flags for run_update.py. Defaults already do a steady-state update;
+  # --dry_run is the useful one for a first manual trigger.
+  args: []
+  stateMountPath: /state
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  backoffLimit: 1
+  persistence:
+    # Small: a checkpoint, a repair state file and rotating logs. RWX so the
+    # volume can be inspected from a debug pod while a run is in flight.
+    accessModes:
+      - ReadWriteMany
+    size: 1Gi
+    storageClassName: ceph-csi-cephfs-sc-sa-ifdata
+  resources:
+    requests:
+      cpu: 500m
+      # Embedding with mxbai is the memory-hungry part, same as the API.
+      memory: 2Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+
+# ---------------------------------------------------------------------------
 # OpenShift build objects (ImageStream + BuildConfig)
 # ---------------------------------------------------------------------------
 # Set build.enabled=false for a cluster that pulls a pre-built image from an

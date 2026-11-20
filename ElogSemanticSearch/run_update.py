@@ -81,11 +81,25 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 # from ElogSemanticSearch/ and additionally lets tools import this module from
 # anywhere without the os.chdir() dance the DebugScripts do.
 _PWD_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pwd.txt')
-with open(_PWD_PATH if os.path.exists(_PWD_PATH) else 'pwd.txt', 'r') as f:
-    ecl_pwd = f.read().strip()
+if not os.path.exists(_PWD_PATH):
+    _PWD_PATH = 'pwd.txt'
+
+# pwd.txt is the laptop fallback and has to stay optional. In a container the
+# password arrives as ECL_PASSWORD from a Secret and the file is deliberately
+# absent, so opening it unconditionally here crashed the updater at import,
+# before any argument was parsed.
+ecl_pwd = ''
+if os.path.exists(_PWD_PATH):
+    with open(_PWD_PATH, 'r') as f:
+        ecl_pwd = f.read().strip()
 
 USERNAME = os.environ.get('ECL_USERNAME', 'sbndprm')
 PASSWORD = os.environ.get('ECL_PASSWORD', ecl_pwd)
+if not PASSWORD:
+    raise RuntimeError(
+        "No ECL password. Set ECL_PASSWORD, or put the password in pwd.txt "
+        "next to run_update.py."
+    )
 
 from DataFetch.ElogFetcherQdrant import ElogFetcher, EntryFetchError, EntryParseError
 from DataFetch.text_to_vector import TextProcessor
@@ -109,7 +123,7 @@ def add_file_logging(log_file=None):
     messages (DataFetch.ElogFetcherQdrant) are captured too.
     """
     if log_file is None:
-        log_dir = os.path.join(os.path.dirname(__file__), 'logs')
+        log_dir = os.path.join(STATE_DIR, 'logs')
         os.makedirs(log_dir, exist_ok=True)
         stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         log_file = os.path.join(log_dir, f'update_{collection_name}_{stamp}.log')
@@ -134,7 +148,13 @@ collection_name = os.environ.get("COLLECTION_NAME")
 if not collection_name:
     raise RuntimeError("Environment variable COLLECTION_NAME must be set.")
 
-CHECKPOINT_FILE = os.path.join(os.path.dirname(__file__), f"init_checkpoint_{collection_name}.json")
+# On a laptop these sit next to the code. A container's filesystem is thrown
+# away each run, and losing the checkpoint means re-walking every ID from
+# scratch, so ELOG_STATE_DIR points all three at a persistent volume.
+STATE_DIR = os.environ.get("ELOG_STATE_DIR") or os.path.dirname(os.path.abspath(__file__))
+os.makedirs(STATE_DIR, exist_ok=True)
+
+CHECKPOINT_FILE = os.path.join(STATE_DIR, f"init_checkpoint_{collection_name}.json")
 
 # Entries whose subject contains any of these words (case-insensitive) are skipped.
 SKIP_SUBJECT_KEYWORDS = ["checklist"]
@@ -639,7 +659,7 @@ def ensure_collection(qdrant_client, vector_size):
 # most once.
 
 REPAIR_STATE_FILE = os.path.join(
-    os.path.dirname(__file__), f"repair_state_{collection_name}.json"
+    STATE_DIR, f"repair_state_{collection_name}.json"
 )
 
 

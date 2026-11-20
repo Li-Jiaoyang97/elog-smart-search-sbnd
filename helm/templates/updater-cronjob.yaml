@@ -1,0 +1,89 @@
+{{- if .Values.updater.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "elog-search.fullname" . }}-updater
+  labels:
+    {{- include "elog-search.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.updater.schedule | quote }}
+  {{- with .Values.updater.timeZone }}
+  # Requires Kubernetes 1.27+. Leave empty to schedule in the cluster's own
+  # timezone, which is what the controller does when this field is absent.
+  timeZone: {{ . | quote }}
+  {{- end }}
+  # Two updaters sharing one checkpoint would lose entries: the second reads a
+  # stale last_id while the first overwrites its advance.
+  concurrencyPolicy: Forbid
+  # A missed run needs no catch-up. The next run walks from the checkpoint and
+  # picks up everything in between, so a long outage costs one slower run.
+  startingDeadlineSeconds: {{ .Values.updater.startingDeadlineSeconds }}
+  successfulJobsHistoryLimit: {{ .Values.updater.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.updater.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      # One retry. A second failure is a real problem - a bad credential or an
+      # ECL outage - and retrying into it only buries the first error.
+      backoffLimit: {{ .Values.updater.backoffLimit }}
+      template:
+        metadata:
+          labels:
+            {{- include "elog-search.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: updater
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: updater
+              image: "{{ .Values.image.repository }}:{{ required "image.tag is required - run helm/build.sh and pass --set image.tag=<sha>" .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              # run_update.py imports DataFetch.* relative to its own directory.
+              workingDir: /app/ElogSemanticSearch
+              command: ["python", "run_update.py"]
+              {{- with .Values.updater.args }}
+              args:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              envFrom:
+                # COLLECTION_NAME and MODEL_PATH, the same values the API uses.
+                # A mismatch here would write 1024-dim vectors into a collection
+                # the API reads with a different model.
+                - configMapRef:
+                    name: {{ include "elog-search.fullname" . }}-config
+              env:
+                - name: QDRANT_HOST
+                  value: {{ include "elog-search.qdrantHost" . | quote }}
+                # Checkpoint, repair state and logs, on the volume below.
+                - name: ELOG_STATE_DIR
+                  value: {{ .Values.updater.stateMountPath | quote }}
+                # OpenShift runs this as an arbitrary UID whose home is "/",
+                # which is not writable; sentence-transformers writes a cache.
+                - name: HOME
+                  value: /tmp
+                - name: HF_HOME
+                  value: /tmp/huggingface
+                - name: ECL_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.eclCredentials.secretName }}
+                      key: {{ .Values.eclCredentials.usernameKey }}
+                - name: ECL_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.eclCredentials.secretName }}
+                      key: {{ .Values.eclCredentials.passwordKey }}
+              volumeMounts:
+                - name: models
+                  mountPath: {{ .Values.models.mountPath }}
+                  readOnly: true
+                - name: state
+                  mountPath: {{ .Values.updater.stateMountPath }}
+              resources:
+                {{- toYaml .Values.updater.resources | nindent 16 }}
+          volumes:
+            - name: models
+              persistentVolumeClaim:
+                claimName: {{ include "elog-search.fullname" . }}-models
+            - name: state
+              persistentVolumeClaim:
+                claimName: {{ include "elog-search.fullname" . }}-updater-state
+{{- end }}
