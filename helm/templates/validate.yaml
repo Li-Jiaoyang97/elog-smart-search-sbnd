@@ -1,0 +1,8 @@
+{{- if .Values.qdrant.enabled }}
+{{- if or (hasKey .Values.qdrant.containerSecurityContext "runAsUser") (hasKey .Values.qdrant.containerSecurityContext "runAsGroup") }}
+{{- fail "\n\nqdrant.containerSecurityContext still sets runAsUser/runAsGroup.\nOpenShift's restricted-v2 SCC will reject the Qdrant pod at admission.\nAdd -f helm/values-okd.yaml to this command.\n" }}
+{{- end }}
+{{- if hasKey .Values.qdrant.podSecurityContext "fsGroup" }}
+{{- fail "\n\nqdrant.podSecurityContext still sets fsGroup.\nOpenShift's restricted-v2 SCC will reject the Qdrant pod at admission.\nAdd -f helm/values-okd.yaml to this command.\n" }}
+{{- end }}
+{{- end }}

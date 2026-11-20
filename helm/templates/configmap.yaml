@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "elog-search.fullname" . }}-config
+  labels:
+    {{- include "elog-search.labels" . | nindent 4 }}
+data:
+  COLLECTION_NAME: {{ .Values.config.collectionName | quote }}
+  MODEL_PATH: {{ .Values.config.modelPath | quote }}
+  RERANK_MODEL_PATH: {{ .Values.config.rerankModelPath | quote }}
+  RERANK_TOP: {{ .Values.config.rerankTop | quote }}

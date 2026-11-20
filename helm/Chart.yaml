@@ -1,0 +1,22 @@
+apiVersion: v2
+name: elog-search
+description: Semantic search over the SBND ECL logbook, with Qdrant as a subchart
+type: application
+
+# Chart version: bump on any change to templates or default values.
+version: 0.1.0
+# The app this chart deploys. Not the image tag - that is image.tag, which
+# build.sh prints after a build.
+appVersion: "0.1.0"
+
+dependencies:
+  - name: qdrant
+    # Pinned to the chart whose appVersion is v1.17.1, the version the local
+    # index was built and tested with (storage format: collections 0.4.2,
+    # segments 0.6.0). Qdrant upgrades the on-disk format in place and will
+    # not downgrade, so a newer release cannot be rolled back.
+    version: "1.17.1"
+    repository: https://qdrant.github.io/qdrant-helm
+    # Set qdrant.enabled=false to point at a Qdrant someone else runs; then
+    # qdrantExternalHost must be set.
+    condition: qdrant.enabled

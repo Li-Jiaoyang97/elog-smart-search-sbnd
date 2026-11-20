@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "elog-search.fullname" . }}-models
+  labels:
+    {{- include "elog-search.labels" . | nindent 4 }}
+  annotations:
+    # Keep the 1.7G of model weights when the release is uninstalled. A
+    # reinstall then skips the download Job entirely.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    {{- toYaml .Values.models.persistence.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.models.persistence.size }}
+  {{- with .Values.models.persistence.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}

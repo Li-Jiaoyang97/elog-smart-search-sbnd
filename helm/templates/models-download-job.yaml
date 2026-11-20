@@ -1,0 +1,60 @@
+{{- if .Values.models.download.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "elog-search.fullname" . }}-download-models
+  labels:
+    {{- include "elog-search.labels" . | nindent 4 }}
+  annotations:
+    # A hook rather than a plain resource: a Job's pod spec is immutable, so
+    # a tracked Job makes every later `helm upgrade` fail. post-install runs
+    # it once, after the PVC exists. before-hook-creation deletes the previous
+    # Job first, which is also how you re-run it: reinstall, or apply this
+    # object on its own.
+    "helm.sh/hook": post-install
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  # One-shot: if the download fails, fix it and recreate the Job rather than
+  # letting it retry into a half-written model directory.
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        {{- include "elog-search.selectorLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: download
+          image: {{ .Values.models.download.image }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              pip install --no-cache-dir "huggingface_hub=={{ .Values.models.download.huggingfaceHubVersion }}"
+              python - <<'PY'
+              from huggingface_hub import snapshot_download
+              for repo, dest in [
+              {{- range .Values.models.download.repos }}
+                  ({{ .id | quote }}, "/models/{{ .dest }}"),
+              {{- end }}
+              ]:
+                  print(f"downloading {repo} -> {dest}", flush=True)
+                  snapshot_download(
+                      repo_id=repo,
+                      local_dir=dest,
+                      allow_patterns=["*.json", "*.txt", "*.model", "*.safetensors", "1_Pooling/*"],
+                  )
+              print("done", flush=True)
+              PY
+              ls -la /models/*/
+          volumeMounts:
+            - name: models
+              mountPath: /models
+          resources:
+            {{- toYaml .Values.models.download.resources | nindent 12 }}
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: {{ include "elog-search.fullname" . }}-models
+{{- end }}

@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "elog-search.fullname" . }}
+  labels:
+    {{- include "elog-search.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "elog-search.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "elog-search.selectorLabels" . | nindent 8 }}
+      annotations:
+        # Restart the API when COLLECTION_NAME or a model path changes;
+        # without this a ConfigMap edit leaves the old values loaded in the
+        # running process.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      containers:
+        - name: api
+          image: "{{ .Values.image.repository }}:{{ required "image.tag is required - run helm/build.sh and pass --set image.tag=<sha>" .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: {{ include "elog-search.fullname" . }}-config
+          env:
+            # Derived from the Qdrant subchart's release-scoped name, or from
+            # qdrantExternalHost when the subchart is disabled.
+            - name: QDRANT_HOST
+              value: {{ include "elog-search.qdrantHost" . | quote }}
+          volumeMounts:
+            - name: models
+              mountPath: {{ .Values.models.mountPath }}
+              # The download Job writes this volume; the API only reads it.
+              readOnly: true
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: {{ .Values.startupProbe.periodSeconds }}
+            failureThreshold: {{ .Values.startupProbe.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: {{ include "elog-search.fullname" . }}-models

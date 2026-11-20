@@ -1,0 +1,19 @@
+# OpenShift / OKD overrides. Pass this on every install and upgrade:
+#
+#   helm install elog-search helm/ -f helm/values-okd.yaml --set image.tag=<sha>
+#
+# It exists as a separate file for one reason: Helm only honours a null that
+# arrives through -f or --set. A null in the parent chart's own values.yaml is
+# ignored and the subchart's default survives, so these three keys cannot be
+# removed in values.yaml. templates/validate.yaml fails the render if this
+# file was forgotten.
+qdrant:
+  containerSecurityContext:
+    # restricted-v2 assigns a UID from the namespace's annotated range and
+    # rejects any pod that names its own.
+    runAsUser: null
+    runAsGroup: null
+  podSecurityContext:
+    # Same for the supplemental group; OpenShift sets fsGroup itself.
+    fsGroup: null
+    fsGroupChangePolicy: null

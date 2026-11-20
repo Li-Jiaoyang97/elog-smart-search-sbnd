@@ -1,0 +1,17 @@
+{{- if .Values.build.enabled }}
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: {{ .Values.image.repository }}
+  labels:
+    {{- include "elog-search.labels" . | nindent 4 }}
+  annotations:
+    # Builds push here and the Deployment pulls from here, so the stream has
+    # to outlive a `helm uninstall` of the app.
+    helm.sh/resource-policy: keep
+spec:
+  # lookupPolicy.local is what lets the Deployment reference a bare
+  # "elog-semantic-search:<sha>" with no registry prefix.
+  lookupPolicy:
+    local: true
+{{- end }}

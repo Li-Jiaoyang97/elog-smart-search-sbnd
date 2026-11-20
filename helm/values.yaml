@@ -1,0 +1,183 @@
+# ---------------------------------------------------------------------------
+# Serving API (RESTAPI_Qdrant_HTML.py)
+# ---------------------------------------------------------------------------
+
+# Deployment, not StatefulSet: the API holds nothing on disk. It reads the
+# models volume read-only and keeps the index in Qdrant, so two of these
+# running at once is harmless - the opposite of the Qdrant case.
+replicaCount: 1
+
+image:
+  # The ImageStream that the BuildConfig pushes to. lookupPolicy.local lets a
+  # bare "name:tag" resolve inside the namespace with no registry prefix.
+  repository: elog-semantic-search
+  # No default on purpose. helm/build.sh prints the commit SHA to pass here.
+  # Deliberately not "latest": the template calls `required` on this, so a
+  # missing tag fails the install instead of silently pinning a tag that can
+  # change under a restart.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# Shared by the serving API and, once it is deployed, the index updater
+# (run_update.py). These two must agree: a 1024-dim model against a 768-dim
+# collection fails at query time, which is what run_update.py's dimension
+# check guards against.
+config:
+  collectionName: Elog_collection_1024_METADATA
+  modelPath: /app/ElogSemanticSearch/models/mxbai-embed-large-v1
+  rerankModelPath: /app/ElogSemanticSearch/models/bge-reranker-base
+  rerankTop: "50"
+
+resources:
+  requests:
+    cpu: 500m
+    # Measured locally: ~2.4Gi resident with mxbai + bge-reranker both loaded.
+    memory: 3Gi
+  limits:
+    # OPA admission on okdprod1 requires all four values.
+    cpu: "2"
+    memory: 4Gi
+
+service:
+  # A normal ClusterIP, unlike qdrant's headless one: nothing needs a stable
+  # per-pod name here, and a cluster IP is what lets a Route in front of it
+  # load-balance if replicaCount ever goes above 1.
+  type: ClusterIP
+  port: 8000
+
+# Both models are read off CephFS at import time, before uvicorn binds the
+# port, so the first /health reply means the API is genuinely ready.
+# 30 x 10s allows five minutes for a cold read.
+startupProbe:
+  periodSeconds: 10
+  failureThreshold: 30
+
+# Set when qdrant.enabled is false, e.g. "qdrant.other-namespace.svc:6333".
+qdrantExternalHost: ""
+
+# ---------------------------------------------------------------------------
+# Embedding + reranker models (shared volume)
+# ---------------------------------------------------------------------------
+models:
+  mountPath: /app/ElogSemanticSearch/models
+  persistence:
+    # RWX: the serving app mounts this read-only and the download Job writes
+    # it. CephFS supports multi-attach.
+    accessModes:
+      - ReadWriteMany
+    # mxbai 640M + bge-reranker 1.1G = ~1.7G.
+    size: 5Gi
+    storageClassName: ceph-csi-cephfs-sc-sa-ifdata
+
+  download:
+    # Runs once as a post-install hook. Disable for an install that reuses a
+    # models volume that is already populated.
+    enabled: true
+    image: python:3.11-slim
+    huggingfaceHubVersion: "0.25.2"
+    repos:
+      - id: mixedbread-ai/mxbai-embed-large-v1
+        dest: mxbai-embed-large-v1
+      - id: BAAI/bge-reranker-base
+        dest: bge-reranker-base
+    resources:
+      requests:
+        cpu: 200m
+        memory: 1Gi
+      limits:
+        cpu: "1"
+        memory: 2Gi
+
+# ---------------------------------------------------------------------------
+# OpenShift build objects (ImageStream + BuildConfig)
+# ---------------------------------------------------------------------------
+# Set build.enabled=false for a cluster that pulls a pre-built image from an
+# external registry instead of building in-namespace.
+build:
+  enabled: true
+  git:
+    # The cluster clones the repo itself, so an image is always traceable to a
+    # commit rather than to whatever happened to be in a laptop's working tree.
+    uri: https://github.com/Li-Jiaoyang97/elog-smart-search-sbnd.git
+    ref: feature/helm-chart
+    # Created by hand, never committed - see helm/README.md. Set to "" if the
+    # repo is public; the clone then needs no credentials.
+    sourceSecret: github-token
+  dockerfilePath: Dockerfile
+  resources:
+    requests:
+      cpu: "1"
+      memory: 2Gi
+    limits:
+      # pip resolving torch and friends is the memory-hungry part; the OPA
+      # webhook requires all four values regardless.
+      cpu: "2"
+      memory: 4Gi
+
+# ---------------------------------------------------------------------------
+# Qdrant subchart (qdrant/qdrant 1.17.1)
+# ---------------------------------------------------------------------------
+# Everything below is passed to the subchart, not to this chart's templates.
+qdrant:
+  enabled: true
+
+  # Still a StatefulSet, which is what the subchart ships: Qdrant owns the
+  # files on its volume and must be the only process writing them. On a node
+  # partition a Deployment eventually assumes the pod is gone and starts a
+  # replacement, which can leave the original running on the unreachable node
+  # with the same volume mounted. A StatefulSet refuses to start the
+  # replacement until the old pod is confirmed deleted.
+  replicaCount: 1
+
+  image:
+    tag: "v1.17.1"
+
+  # The subchart defaults to runAsUser 1000, runAsGroup 2000 and fsGroup 3000.
+  # All three sit outside the UID range OpenShift allocates per namespace, and
+  # restricted-v2 rejects a pod that asks for a specific one, so they have to
+  # be deleted rather than changed.
+  #
+  # They CANNOT be deleted from this file. Helm ignores a null written in a
+  # parent chart's own values.yaml and keeps the subchart's default; a null
+  # only deletes when it arrives from -f or --set. So the deletions live in
+  # values-okd.yaml, which every install on OKD must pass with -f.
+  # templates/validate.yaml fails the render if it was left out.
+  containerSecurityContext:
+    runAsNonRoot: true
+    allowPrivilegeEscalation: false
+    privileged: false
+    readOnlyRootFilesystem: true
+
+  # The chart's fs-ownership init container runs chown as root, which
+  # restricted-v2 forbids. CephFS plus the SCC's own fsGroup handle ownership.
+  updateVolumeFsOwnership: false
+
+  config:
+    cluster:
+      # Off, matching the hand-written StatefulSet this chart replaces, and
+      # matching how the local index was built. Turning this on is step 1 of
+      # going multi-node; see helm/README.md.
+      enabled: false
+
+  persistence:
+    accessModes:
+      - ReadWriteOnce
+    # Single collection: Elog_collection_1024_METADATA is ~593M today.
+    size: 10Gi
+    storageClassName: ceph-csi-cephfs-sc-sa-ifdata
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 5
+  livenessProbe:
+    # The subchart ships this disabled; the hand-written StatefulSet had it on.
+    enabled: true
+    initialDelaySeconds: 15

@@ -1,0 +1,21 @@
+{{ .Chart.Name }} {{ .Chart.Version }} installed as release "{{ .Release.Name }}".
+
+  API service   {{ include "elog-search.fullname" . }}:{{ .Values.service.port }}
+  Qdrant        {{ include "elog-search.qdrantHost" . }}:6333
+  Image         {{ .Values.image.repository }}:{{ .Values.image.tag }}
+  Collection    {{ .Values.config.collectionName }}
+
+{{ if .Values.models.download.enabled -}}
+The model download Job runs now as a post-install hook and takes a few
+minutes. The API restarts until the weights land; that is expected.
+
+  oc logs -f job/{{ include "elog-search.fullname" . }}-download-models
+{{- end }}
+
+Reach the API:
+
+  oc port-forward svc/{{ include "elog-search.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+  curl -s localhost:{{ .Values.service.port }}/health
+
+There is no Route. OpenWebUI running in this namespace reaches the service
+directly and still does not need one.

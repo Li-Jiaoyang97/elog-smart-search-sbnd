@@ -1,0 +1,36 @@
+{{- if .Values.build.enabled }}
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: {{ .Values.image.repository }}
+  labels:
+    {{- include "elog-search.labels" . | nindent 4 }}
+spec:
+  source:
+    type: Git
+    git:
+      uri: {{ .Values.build.git.uri }}
+      ref: {{ .Values.build.git.ref }}
+    {{- with .Values.build.git.sourceSecret }}
+    sourceSecret:
+      # Created by hand, never committed - see helm/README.md. Set
+      # build.git.sourceSecret to "" if the repo is made public; the clone
+      # then needs no credentials.
+      name: {{ . }}
+    {{- end }}
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: {{ .Values.build.dockerfilePath }}
+  output:
+    to:
+      # Builds land on :latest and helm/build.sh immediately tags the result
+      # with the commit SHA it was built from. OKD substitutes nothing in this
+      # field and start-build has no --to, so the commit tag has to be applied
+      # after the build. image.tag always names a SHA, never :latest, so a
+      # restart cannot quietly change versions.
+      kind: ImageStreamTag
+      name: {{ .Values.image.repository }}:latest
+  resources:
+    {{- toYaml .Values.build.resources | nindent 4 }}
+{{- end }}
